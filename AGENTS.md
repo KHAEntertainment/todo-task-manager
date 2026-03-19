@@ -37,6 +37,18 @@ cd /home/openclaw/projects/todo-task-manager
 bd init
 ```
 
+**Note:** Beads requires Dolt to be installed. If not installed, run:
+```bash
+# Install Dolt
+curl https://get.dolt.io/scripts/install.sh | bash
+
+# Or use package manager
+brew install dolt  # macOS
+sudo apt install dolt  # Debian/Ubuntu
+```
+
+Then initialize Beads with `bd init`.
+
 ### Track Work with Beads
 
 When working on implementation tasks:
@@ -177,6 +189,14 @@ You'll know Phase 1 is complete when:
 - [ ] Tasks persist across session restarts (test this!)
 - [ ] All slash commands work reliably
 - [ ] Beads tasks for Phase 1 are marked done
+
+---
+
+## Current Status
+
+**Phase:** Planning → **Complete** (Ready for Phase 1 implementation)
+**Beads:** Not initialized yet (requires Dolt installation)
+**GitHub:** Repo created at https://github.com/KHAEntertainment/todo-task-manager
 
 ---
 

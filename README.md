@@ -44,7 +44,7 @@ Tasks can have `dependsOn: ["task_001", "task_002"]` arrays. A task with uncompl
 - `SDP.md` — Software Design Document with User Stories
 - `AGENTS.md` — Agent instructions + Beads usage
 - `prompt-for-build.md` — Clean prompt for starting build in new session
-- GitHub: [tbd]
+- GitHub: https://github.com/KHAEntertainment/todo-task-manager
 
 ## Related Tools
 
