@@ -4,23 +4,32 @@ const require = createRequire(import.meta.url);
 const TASKS_MODULE_PATH = "/home/openclaw/.openclaw/workspace/skills/task-manager/tasks.js";
 
 const TYPE_LABELS: Record<string, string> = {
-  EPIC: "\uD83C\uDFD7\uFE0F EPIC",
-  TASK: "\uD83D\uDCCB TASK",
-  STORY: "\uD83D\uDCC4 STORY",
+  EPIC: "🎯 EPIC",
+  TASK: "📋 TASK",
+  STORY: "📄 STORY",
 };
 
 const STATUS_LABELS: Record<string, string> = {
-  OPEN: "\u23F8\uFE0F OPEN",
-  IN_PROGRESS: "\uD83D\uDD04 IN_PROGRESS",
-  COMPLETED: "\u2705 COMPLETED",
-  CANCELLED: "\uD83D\uDEAB CANCELLED",
-  BLOCKED: "\uD83D\uDEA7 BLOCKED",
+  OPEN: "⏸ OPEN",
+  IN_PROGRESS: "🔄 IN_PROGRESS",
+  COMPLETED: "✅ COMPLETED",
+  CANCELLED: "🚫 CANCELLED",
+  BLOCKED: "🛑 BLOCKED",
 };
 
 const ACTIVE_STATUSES = new Set(["OPEN", "IN_PROGRESS", "BLOCKED"]);
 
+// Known agent IDs for task discovery
+const KNOWN_AGENTS = new Set(["planner", "coder", "albert"]);
+
+// In-memory store for session-to-agent mapping (for before_agent_start injection)
+let lastSessionInfo: { agentId?: string; sessionKey?: string; sessionId?: string } = {};
+
 type PluginCommandContext = {
   args?: string;
+  agentId?: string;
+  sessionId?: string;
+  sessionKey?: string;
 };
 
 type PluginCommandPayload = {
@@ -62,7 +71,8 @@ function tokenizeArgs(input: string) {
       continue;
     }
 
-    if (/\s/.test(char)) {
+    // Handle both regular hyphen and em-dash as whitespace delimiters
+    if (/\s/.test(char) || char === '−' || char === '—') {
       if (current) {
         tokens.push(current);
         current = "";
@@ -127,12 +137,18 @@ function sortTasks(tasks: Array<{ id: string; status: string }>) {
   });
 }
 
-function formatActionHints(task: { id: string }) {
-  return [
-    `[\u2705 Complete: /task complete ${task.id}]`,
-    `[\u23F8\uFE0F Pause: /task pause ${task.id}]`,
-    `[\u274C Delete: /task delete ${task.id}]`,
-  ].join(" ");
+function formatActionHints(task: { id: string; status: string }) {
+  const hints = [];
+  if (task.status === "OPEN") {
+    hints.push(`[🎯 Claim: /task claim ${task.id}]`);
+  }
+  hints.push(`[✅ Complete: /task complete ${task.id}]`);
+  hints.push(`[⏸ Pause: /task pause ${task.id}]`);
+  hints.push(`[🔄 Unassign: /task unassign ${task.id}]`);
+  hints.push(`[👤 Reassign: /task assign ${task.id} --assignee coder]`);
+  hints.push(`[✏️ Edit: /task edit ${task.id} --title \"...\" --prompt \"...\" --type TASK --assignee coder]`);
+  hints.push(`[❌ Delete: /task delete ${task.id}]`);
+  return hints.join(" ");
 }
 
 function formatTask(task: {
@@ -141,6 +157,10 @@ function formatTask(task: {
   status: string;
   title: string;
   assignedTo?: string;
+  claimedBy?: string;
+  claimedAt?: string;
+  completedBy?: string;
+  completedAt?: string;
   dependsOn?: string[];
   prompt?: string;
 }) {
@@ -151,6 +171,20 @@ function formatTask(task: {
 
   if (task.assignedTo) {
     lines.push(`Assignee: ${task.assignedTo}`);
+  }
+
+  if (task.claimedBy) {
+    const claimTime = task.claimedAt
+      ? new Date(task.claimedAt).toLocaleString("en-US", { timeZone: "America/Los_Angeles" })
+      : "";
+    lines.push(`Claimed by: ${task.claimedBy}${claimTime ? ` at ${claimTime}` : ""}`);
+  }
+
+  if (task.completedBy) {
+    const completeTime = task.completedAt
+      ? new Date(task.completedAt).toLocaleString("en-US", { timeZone: "America/Los_Angeles" })
+      : "";
+    lines.push(`Completed by: ${task.completedBy}${completeTime ? ` at ${completeTime}` : ""}`);
   }
 
   if (Array.isArray(task.dependsOn) && task.dependsOn.length > 0) {
@@ -172,8 +206,8 @@ function formatTaskList({ showAll = false }: { showAll?: boolean } = {}): Plugin
   const { TASKS_FILE } = getTasksModule();
   const tasks = sortTasks(filterTasks(showAll));
   const header = showAll
-    ? "\uD83D\uDCC2 Todo Task Manager - All Tasks"
-    : "\uD83D\uDCC2 Todo Task Manager - Active Tasks";
+    ? "📋 Todo Task Manager - All Tasks"
+    : "📋 Todo Task Manager - Active Tasks";
 
   if (tasks.length === 0) {
     return {
@@ -184,6 +218,7 @@ function formatTaskList({ showAll = false }: { showAll?: boolean } = {}): Plugin
   }
 
   const body = tasks.map(formatTask).join("\n\n");
+
   return {
     text: `${header}\nTasks file: ${TASKS_FILE}\n\n${body}`,
   };
@@ -204,8 +239,12 @@ function buildUsage() {
     "/tasks",
     "/tasks all",
     "/task add \"Title\" --prompt \"Full prompt\" --assignee coder --type TASK",
+    "/task claim task_001",
     "/task complete task_001",
     "/task pause task_001",
+    "/task unassign task_001",
+    "/task assign task_001 --assignee coder",
+    "/task edit task_001 --title \"New title\" --prompt \"New prompt\" --type TASK --assignee coder",
     "/task delete task_001",
   ].join("\n");
 }
@@ -217,6 +256,8 @@ async function handleTasksCommand(ctx: PluginCommandContext): Promise<PluginComm
 
 async function handleTaskCommand(ctx: PluginCommandContext): Promise<PluginCommandPayload> {
   const args = (ctx.args || "").trim();
+  // Use agentId from context (preferred) or fall back to lastSessionInfo
+  const agentId = ctx.agentId || lastSessionInfo.agentId || "";
   if (!args) {
     return { text: buildUsage() };
   }
@@ -263,9 +304,17 @@ async function handleTaskCommand(ctx: PluginCommandContext): Promise<PluginComma
     }
 
     if (action === "complete") {
-      const { updateTaskStatus } = getTasksModule();
-      const task = updateTaskStatus(id, "COMPLETED");
-      return { text: `Updated ${task.id} -> ${STATUS_LABELS[task.status]}` };
+      const { completeTask } = getTasksModule();
+      const task = completeTask(id, agentId);
+      return {
+        text: `Updated ${task.id} -> ${STATUS_LABELS[task.status]}\n${formatTask(task)}`,
+      };
+    }
+
+    if (action === "claim") {
+      const { claimTask } = getTasksModule();
+      const task = claimTask(id, agentId);
+      return { text: `Claimed ${task.id} -> ${STATUS_LABELS[task.status]}\nClaimed by: ${task.claimedBy} at ${new Date(task.claimedAt!).toLocaleString("en-US", { timeZone: "America/Los_Angeles" })}` };
     }
 
     if (action === "pause") {
@@ -281,6 +330,43 @@ async function handleTaskCommand(ctx: PluginCommandContext): Promise<PluginComma
       return { text: `Deleted ${id}` };
     }
 
+    if (action === "edit") {
+      const { positional: _optsPositional, options } = parseOptions(tokens.slice(1));
+      const { updateTask } = getTasksModule();
+      const task = updateTask(id, {
+        title: options.title !== undefined ? String(options.title) : undefined,
+        prompt: options.prompt !== undefined ? String(options.prompt) : undefined,
+        type: options.type !== undefined ? String(options.type).toUpperCase() : undefined,
+        assignedTo: options.assignee !== undefined ? String(options.assignee) : undefined,
+      });
+      return {
+        text: `Updated ${task.id}\n${formatTask(task)}`,
+      };
+    }
+
+    if (action === "unassign") {
+      const { unassignTask } = getTasksModule();
+      const task = unassignTask(id);
+      return {
+        text: `Unassigned ${task.id} -> ${STATUS_LABELS[task.status]}`,
+      };
+    }
+
+    if (action === "assign") {
+      const { positional: _optsPositional, options } = parseOptions(tokens.slice(1));
+      const assignee = options.assignee;
+      if (!assignee) {
+        return {
+          text: "Usage: /task assign task_001 --assignee coder",
+        };
+      }
+      const { assignTask } = getTasksModule();
+      const task = assignTask(id, String(assignee));
+      return {
+        text: `Assigned ${task.id} -> ${STATUS_LABELS[task.status]} (Assignee: ${task.assignedTo})`,
+      };
+    }
+
     return { text: buildUsage() };
   } catch (error) {
     return {
@@ -290,7 +376,7 @@ async function handleTaskCommand(ctx: PluginCommandContext): Promise<PluginComma
   }
 }
 
-export function registerTaskManagerCommands(api: {
+function registerTaskManagerCommands(api: {
   registerCommand: (definition: {
     name: string;
     description: string;
@@ -313,6 +399,90 @@ export function registerTaskManagerCommands(api: {
   });
 }
 
+/**
+ * Format tasks for agent discovery message (session start).
+ * Matches PHASE2_PLAN.md spec format.
+ */
+function formatTaskDiscovery(agentId: string): string {
+  const { readTasks } = getTasksModule();
+  const allTasks = readTasks();
+
+  // Filter to OPEN tasks assigned to this agent
+  const agentTasks = allTasks.filter(
+    (task: { assignedTo?: string; status: string }) =>
+      task.assignedTo?.toLowerCase() === agentId.toLowerCase() &&
+      task.status === "OPEN",
+  );
+
+  if (agentTasks.length === 0) {
+    return "";
+  }
+
+  const lines: string[] = [
+    "━━━━━━━━━━━━━━━━━━━━━━",
+    "📋 You have OPEN tasks assigned to you:",
+    "━━━━━━━━━━━━━━━━━━━━━━",
+  ];
+
+  for (const task of agentTasks) {
+    lines.push("");
+    lines.push(`${TYPE_LABELS[task.type] || task.type} ${task.id}: "${task.title}"`);
+    if (task.prompt) {
+      lines.push(`  Prompt: ${task.prompt}`);
+    }
+    lines.push(
+      `  Actions: /task claim ${task.id} | /task complete ${task.id} | /task pause ${task.id}`,
+    );
+  }
+
+  lines.push("");
+  lines.push("━━━━━━━━━━━━━━━━━━━━━━");
+
+  return lines.join("\n");
+}
+
+/**
+ * Register session lifecycle hooks.
+ * session_start: store agent/session info
+ * before_agent_start: inject task discovery context
+ */
+function registerSessionHooks(api: {
+  on: (event: string, handler: (event: unknown, ctx: unknown) => unknown) => void;
+  logger: { info: (msg: string) => void; warn: (msg: string) => void };
+}) {
+  // session_start: capture agent context for later use in before_agent_start
+  api.on("session_start", (event: { sessionId: string; sessionKey?: string; resumedFrom?: string }, ctx: { agentId?: string; sessionId: string; sessionKey?: string }) => {
+    lastSessionInfo = {
+      agentId: ctx.agentId,
+      sessionKey: ctx.sessionKey,
+      sessionId: ctx.sessionId,
+    };
+    api.logger.info(`task-manager: session_start for agent=${ctx.agentId} session=${ctx.sessionId}`);
+  });
+
+  // before_agent_start: inject task discovery for known agents
+  api.on("before_agent_start", (event: { prompt: string; messages?: unknown[] }, ctx: { agentId?: string; sessionKey?: string }) => {
+    const agentId = ctx.agentId || lastSessionInfo.agentId;
+    if (!agentId) return;
+
+    // Only inject for known agents
+    if (!KNOWN_AGENTS.has(agentId.toLowerCase())) {
+      return;
+    }
+
+    const discovery = formatTaskDiscovery(agentId);
+    if (!discovery) {
+      return;
+    }
+
+    api.logger.info(`task-manager: injecting task discovery for agent=${agentId}`);
+
+    return {
+      prependContext: `<task-discovery>\n${discovery}\n</task-discovery>`,
+    };
+  });
+}
+
 export {
   buildUsage,
   formatTask,
@@ -331,6 +501,9 @@ export default function register(api: {
     acceptsArgs: boolean;
     handler: (ctx: PluginCommandContext) => Promise<PluginCommandPayload>;
   }) => void;
+  on: (event: string, handler: (event: unknown, ctx: unknown) => unknown) => void;
+  logger: { info: (msg: string) => void; warn: (msg: string) => void };
 }) {
   registerTaskManagerCommands(api);
+  registerSessionHooks(api);
 }
