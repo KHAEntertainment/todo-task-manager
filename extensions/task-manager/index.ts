@@ -19,6 +19,18 @@ const STATUS_LABELS: Record<string, string> = {
 
 const ACTIVE_STATUSES = new Set(["OPEN", "IN_PROGRESS", "BLOCKED"]);
 
+const PRIORITY_LABELS: Record<string, string> = {
+  HIGH: "🚨 HIGH",
+  MEDIUM: "⚠️ MEDIUM",
+  LOW: "📌 LOW",
+};
+
+const PRIORITY_ORDER: Record<string, number> = {
+  HIGH: 0,
+  MEDIUM: 1,
+  LOW: 2,
+};
+
 // Known agent IDs for task discovery
 const KNOWN_AGENTS = new Set(["planner", "coder", "albert"]);
 
@@ -115,22 +127,39 @@ function parseOptions(tokens: string[]) {
   return { positional, options };
 }
 
-function filterTasks(showAll: boolean) {
+function filterTasks(showAll: boolean, priorityFilter?: string | null) {
   const { readTasks } = getTasksModule();
-  const tasks = readTasks();
-  if (showAll) {
-    return tasks;
+  let tasks = readTasks();
+  if (!showAll) {
+    tasks = tasks.filter((task: { status: string }) => ACTIVE_STATUSES.has(task.status));
   }
-
-  return tasks.filter((task: { status: string }) => ACTIVE_STATUSES.has(task.status));
+  if (priorityFilter) {
+    tasks = tasks.filter((task: { priority?: string }) => (task.priority || "MEDIUM") === priorityFilter);
+  }
+  return tasks;
 }
 
-function sortTasks(tasks: Array<{ id: string; status: string }>) {
+function sortTasks(tasks: Array<{ id: string; status: string; priority?: string }>) {
+  const { TASK_PRIORITIES } = getTasksModule();
+
   return [...tasks].sort((left, right) => {
     const statusDelta =
       Number(ACTIVE_STATUSES.has(right.status)) - Number(ACTIVE_STATUSES.has(left.status));
     if (statusDelta !== 0) {
       return statusDelta;
+    }
+
+    // Secondary sort: priority (HIGH -> MEDIUM -> LOW)
+    const leftPriority = left.priority || "MEDIUM";
+    const rightPriority = right.priority || "MEDIUM";
+
+    // Fallback for invalid priorities: map to MEDIUM (safe default)
+    const leftNumeric = TASK_PRIORITIES.includes(leftPriority) ? PRIORITY_ORDER[leftPriority] : PRIORITY_ORDER["MEDIUM"];
+    const rightNumeric = TASK_PRIORITIES.includes(rightPriority) ? PRIORITY_ORDER[rightPriority] : PRIORITY_ORDER["MEDIUM"];
+    const priorityDelta = leftNumeric - rightNumeric;
+
+    if (priorityDelta !== 0) {
+      return priorityDelta;
     }
 
     return left.id.localeCompare(right.id);
@@ -151,20 +180,28 @@ function formatActionHints(task: { id: string; status: string }) {
   return hints.join(" ");
 }
 
+function formatPriority(priority?: string): string {
+  return PRIORITY_LABELS[priority || "MEDIUM"] || PRIORITY_LABELS.MEDIUM;
+}
+
 function formatTask(task: {
   id: string;
   type: string;
   status: string;
   title: string;
+  priority?: string;
   assignedTo?: string;
   claimedBy?: string;
   claimedAt?: string;
   completedBy?: string;
   completedAt?: string;
   dependsOn?: string[];
+  blockedBy?: string[];
+  blockedReason?: string;
   prompt?: string;
 }) {
   const lines = [
+    formatPriority(task.priority),
     `${TYPE_LABELS[task.type] || task.type} ${task.id}`,
     `${STATUS_LABELS[task.status] || task.status} ${task.title}`,
   ];
@@ -191,6 +228,13 @@ function formatTask(task: {
     lines.push(`Depends on: ${task.dependsOn.join(", ")}`);
   }
 
+  if (task.status === "BLOCKED" && Array.isArray(task.blockedBy) && task.blockedBy.length > 0) {
+    lines.push(`Blocked by: ${task.blockedBy.join(", ")}`);
+    if (task.blockedReason) {
+      lines.push(`Reason: ${task.blockedReason}`);
+    }
+  }
+
   if (task.prompt) {
     lines.push(`Prompt: ${task.prompt}`);
   }
@@ -202,12 +246,26 @@ function formatTask(task: {
   return lines.join("\n");
 }
 
-function formatTaskList({ showAll = false }: { showAll?: boolean } = {}): PluginCommandPayload {
+function formatTaskList({ showAll = false, priorityFilter, showBlocked }: { showAll?: boolean; priorityFilter?: string | null; showBlocked?: boolean } = {}): PluginCommandPayload {
   const { TASKS_FILE } = getTasksModule();
-  const tasks = sortTasks(filterTasks(showAll));
-  const header = showAll
+  let tasks = filterTasks(showAll, priorityFilter);
+
+  // Filter for blocked tasks if requested
+  if (showBlocked) {
+    tasks = tasks.filter((task: { status: string }) => task.status === "BLOCKED");
+  }
+
+  tasks = sortTasks(tasks);
+
+  let header = showAll
     ? "📋 Todo Task Manager - All Tasks"
     : "📋 Todo Task Manager - Active Tasks";
+  if (showBlocked) {
+    header = "📋 Todo Task Manager - Blocked Tasks";
+  }
+  if (priorityFilter) {
+    header += ` [${formatPriority(priorityFilter)}]`;
+  }
 
   if (tasks.length === 0) {
     return {
@@ -238,20 +296,28 @@ function buildUsage() {
     "Task Manager commands:",
     "/tasks",
     "/tasks all",
-    "/task add \"Title\" --prompt \"Full prompt\" --assignee coder --type TASK",
+    "/tasks blocked",
+    "/tasks --priority HIGH",
+    "/task add \"Title\" --prompt \"Full prompt\" --assignee coder --type TASK --priority HIGH --depends task_001,task_002",
     "/task claim task_001",
     "/task complete task_001",
     "/task pause task_001",
     "/task unassign task_001",
     "/task assign task_001 --assignee coder",
-    "/task edit task_001 --title \"New title\" --prompt \"New prompt\" --type TASK --assignee coder",
+    "/task edit task_001 --title \"New title\" --prompt \"New prompt\" --type TASK --priority HIGH --depends task_001",
     "/task delete task_001",
   ].join("\n");
 }
 
 async function handleTasksCommand(ctx: PluginCommandContext): Promise<PluginCommandPayload> {
-  const showAll = (ctx.args || "").trim().toLowerCase() === "all";
-  return formatTaskList({ showAll });
+  const args = (ctx.args || "").trim();
+  const tokens = tokenizeArgs(args);
+  const { options } = parseOptions(tokens);
+  const showAll = tokens.some(t => t.toLowerCase() === "all");
+  const showBlocked = tokens.some(t => t.toLowerCase() === "blocked");
+  const priorityFilter = options.priority ? String(options.priority).toUpperCase() : null;
+
+  return formatTaskList({ showAll, priorityFilter, showBlocked });
 }
 
 async function handleTaskCommand(ctx: PluginCommandContext): Promise<PluginCommandPayload> {
@@ -272,10 +338,29 @@ async function handleTaskCommand(ctx: PluginCommandContext): Promise<PluginComma
   try {
     if (action === "add") {
       const { positional, options } = parseOptions(tokens);
+      const { TASK_TYPES, TASK_PRIORITIES } = getTasksModule();
       const title = positional.join(" ").trim();
       if (!title) {
         return {
-          text: "Usage: /task add \"Title\" --prompt \"Full prompt\" --assignee coder --type TASK",
+          text: "Usage: /task add \"Title\" --prompt \"Full prompt\" --assignee coder --type TASK --priority HIGH",
+        };
+      }
+
+      // Validate and normalize type before toUpperCase()
+      const rawType = options.type || "TASK";
+      const type = String(rawType).toUpperCase();
+      if (!TASK_TYPES.includes(type)) {
+        return {
+          text: `Invalid task type: ${rawType}. Valid types: ${TASK_TYPES.join(", ")}`,
+        };
+      }
+
+      // Validate and normalize priority before toUpperCase()
+      const rawPriority = options.priority || "MEDIUM";
+      const priority = String(rawPriority).toUpperCase();
+      if (!TASK_PRIORITIES.includes(priority)) {
+        return {
+          text: `Invalid priority: ${rawPriority}. Valid priorities: ${TASK_PRIORITIES.join(", ")}`,
         };
       }
 
@@ -286,15 +371,16 @@ async function handleTaskCommand(ctx: PluginCommandContext): Promise<PluginComma
 
       const { addTask } = getTasksModule();
       const task = addTask({
-        type: String(options.type || "TASK").toUpperCase(),
+        type,
         title,
         prompt: String(options.prompt || ""),
         assignedTo: String(options.assignee || ""),
         dependsOn,
+        priority,
       });
 
       return {
-        text: `Created ${task.id}\n${TYPE_LABELS[task.type]} ${task.title}\n${STATUS_LABELS[task.status]}`,
+        text: `Created ${task.id}\n${formatPriority(task.priority)} ${TYPE_LABELS[task.type]} ${task.title}\n${STATUS_LABELS[task.status]}`,
       };
     }
 
@@ -332,12 +418,43 @@ async function handleTaskCommand(ctx: PluginCommandContext): Promise<PluginComma
 
     if (action === "edit") {
       const { positional: _optsPositional, options } = parseOptions(tokens.slice(1));
+      const { TASK_TYPES, TASK_PRIORITIES } = getTasksModule();
+
+      // Validate and normalize type before toUpperCase()
+      if (options.type !== undefined) {
+        const type = String(options.type).toUpperCase();
+        if (!TASK_TYPES.includes(type)) {
+          return {
+            text: `Invalid task type: ${options.type}. Valid types: ${TASK_TYPES.join(", ")}`,
+          };
+        }
+      }
+
+      // Validate and normalize priority before toUpperCase()
+      if (options.priority !== undefined) {
+        const priority = String(options.priority).toUpperCase();
+        if (!TASK_PRIORITIES.includes(priority)) {
+          return {
+            text: `Invalid priority: ${options.priority}. Valid priorities: ${TASK_PRIORITIES.join(", ")}`,
+          };
+        }
+      }
+
+      const dependsOn = options.depends !== undefined
+        ? String(options.depends)
+            .split(",")
+            .map((value) => value.trim())
+            .filter(Boolean)
+        : undefined;
+
       const { updateTask } = getTasksModule();
       const task = updateTask(id, {
         title: options.title !== undefined ? String(options.title) : undefined,
         prompt: options.prompt !== undefined ? String(options.prompt) : undefined,
         type: options.type !== undefined ? String(options.type).toUpperCase() : undefined,
         assignedTo: options.assignee !== undefined ? String(options.assignee) : undefined,
+        priority: options.priority !== undefined ? String(options.priority).toUpperCase() : undefined,
+        dependsOn,
       });
       return {
         text: `Updated ${task.id}\n${formatTask(task)}`,
