@@ -621,3 +621,49 @@ After deep research into OpenClaw plugin SDK and Telegram channel internals:
 1. ✅ **Option A**: Implement pragmatic button → command routing (THIS PHASE)
 2. 📋 **Option B**: File upstream issue to OpenClaw requesting `callback_query` plugin hooks
 3. �冻 **Option C**: Reserve as fallback if Option A proves unworkable in practice
+
+---
+
+## 2026-03-19 Evening Update: Option D Recommended
+
+### Options Status Update
+| Option | Description | Status |
+|--------|-------------|--------|
+| A | Pragmatic Button → Command Routing | ❌ BROKEN — callback_query not echoed to chat |
+| B | Plugin SDK Enhancement (upstream) | 📋 Tracked — requires upstream PR |
+| C | Custom Gateway Method | ❄️ Reserved — fallback |
+| D | **Telegram Web App** | ✅ RECOMMENDED — web_app buttons over Tailscale |
+
+### Why Option D Won
+- Works TODAY — no upstream OpenClaw changes needed
+- Proven pattern — OCBS and ClawVault already do this
+- Rich UI — full HTML/CSS/JS flexibility
+- Secure — Tailscale VPN access only
+- Fast to build — simple web server + HTML UI
+
+### Option D Implementation Plan
+1. Simple web server (Hono/Express) on port e.g. 18799
+2. HTML task manager UI (list, claim, complete, edit, delete, priority, dependencies)
+3. Tailscale `tailscale serve` to expose the web app
+4. Update plugin to use `web_app` buttons instead of `callback_data` buttons
+5. Web app reads/writes to tasks.json directly via API endpoints
+
+### What We Tried (2026-03-19 Evening)
+- Deep code research into OpenClaw's pi-embedded-jHMb7qEG.js
+- Traced callback_query handling: Grammy bot.on("callback_query") → answerCallbackQuery() → NO text echo
+- User confirmed: clicking buttons produces zero feedback to Jean
+- Conclusion: Option A fundamentally broken, Option B/C require upstream changes
+
+### Tomorrow's Agenda
+1. Confirm Option D (Web App) as the chosen path
+2. Build the simple task web UI (HTML/CSS/JS)
+3. Set up web server with Tailscale serve
+4. Update plugin to use web_app buttons instead of callback_data buttons
+5. Merge Phase 3.2 PR when ready
+6. Continue with Phase 3.4 (Multi-Source Ingestion)
+
+### Git State
+- Branch `feat/phase3.3-interactive-ui` on GitHub has Option A code (non-functional)
+- Option A code deployed to `/home/openclaw/.openclaw/extensions/task-manager/index.ts`
+- `feat/phase3.2-dependencies` is clean and ready for PR
+- `feat/phase3-interactive-ui` (PR #1) has Phase 3.1 priority code
