@@ -44,9 +44,21 @@ type PluginCommandContext = {
   sessionKey?: string;
 };
 
+type TelegramButton = {
+  text: string;
+  callback_data: string;
+};
+
+type TelegramButtons = TelegramButton[][];
+
 type PluginCommandPayload = {
   text: string;
   isError?: boolean;
+  channelData?: {
+    telegram?: {
+      buttons?: TelegramButtons;
+    };
+  };
 };
 
 function getTasksModule() {
@@ -246,7 +258,7 @@ function formatTask(task: {
   return lines.join("\n");
 }
 
-function formatTaskList({ showAll = false, priorityFilter, showBlocked }: { showAll?: boolean; priorityFilter?: string | null; showBlocked?: boolean } = {}): PluginCommandPayload {
+function formatTaskList({ showAll = false, priorityFilter, showBlocked, page = 0 }: { showAll?: boolean; priorityFilter?: string | null; showBlocked?: boolean; page?: number } = {}): PluginCommandPayload {
   const { TASKS_FILE } = getTasksModule();
   let tasks = filterTasks(showAll, priorityFilter);
 
@@ -275,10 +287,60 @@ function formatTaskList({ showAll = false, priorityFilter, showBlocked }: { show
     };
   }
 
-  const body = tasks.map(formatTask).join("\n\n");
+  // Pagination: show max 5 tasks per page
+  const TASKS_PER_PAGE = 5;
+  const totalPages = Math.ceil(tasks.length / TASKS_PER_PAGE);
+  const startIdx = page * TASKS_PER_PAGE;
+  const pageTasks = tasks.slice(startIdx, startIdx + TASKS_PER_PAGE);
+
+  const body = pageTasks.map(formatTask).join("\n\n");
+
+  // Build inline buttons for each visible task
+  const buttonRows: TelegramButton[][] = pageTasks.map((task: { id: string; status: string; claimedBy?: string }) => {
+    const rows: TelegramButton[] = [];
+
+    // Complete button (always show for active tasks)
+    rows.push({ text: `✅ Complete ${task.id}`, callback_data: `/task complete ${task.id}` });
+
+    // Claim/Resume button
+    if (task.status === "OPEN" || task.status === "BLOCKED") {
+      rows.push({ text: `🙋 Claim ${task.id}`, callback_data: `/task claim ${task.id}` });
+    }
+    if (task.status === "BLOCKED") {
+      rows.push({ text: `▶️ Resume ${task.id}`, callback_data: `/task status ${task.id} IN_PROGRESS` });
+    }
+
+    // Pause button (for non-completed tasks)
+    if (task.status !== "COMPLETED" && task.status !== "CANCELLED") {
+      rows.push({ text: `⏸ Pause ${task.id}`, callback_data: `/task pause ${task.id}` });
+    }
+
+    // View details button
+    rows.push({ text: `👁 View ${task.id}`, callback_data: `/task view ${task.id}` });
+
+    return rows;
+  });
+
+  // Add Next/Previous pagination buttons if needed
+  if (totalPages > 1) {
+    const navRow: TelegramButton[] = [];
+    if (page > 0) {
+      navRow.push({ text: "⬅️ Prev", callback_data: `/tasks page ${page - 1}` });
+    }
+    navRow.push({ text: `📄 ${page + 1}/${totalPages}`, callback_data: `/tasks page ${page}` });
+    if (page < totalPages - 1) {
+      navRow.push({ text: "Next ➡️", callback_data: `/tasks page ${page + 1}` });
+    }
+    buttonRows.push(navRow);
+  }
 
   return {
     text: `${header}\nTasks file: ${TASKS_FILE}\n\n${body}`,
+    channelData: {
+      telegram: {
+        buttons: buttonRows.length > 0 ? buttonRows : undefined,
+      },
+    },
   };
 }
 
@@ -317,13 +379,27 @@ async function handleTasksCommand(ctx: PluginCommandContext): Promise<PluginComm
   const showBlocked = tokens.some(t => t.toLowerCase() === "blocked");
   const priorityFilter = options.priority ? String(options.priority).toUpperCase() : null;
 
-  return formatTaskList({ showAll, priorityFilter, showBlocked });
+  // Parse page number from "page N" token
+  let page = 0;
+  const pageIndex = tokens.findIndex(t => t.toLowerCase() === "page");
+  if (pageIndex !== -1 && tokens[pageIndex + 1]) {
+    const pageNum = parseInt(tokens[pageIndex + 1], 10);
+    if (!isNaN(pageNum) && pageNum >= 0) {
+      page = pageNum;
+    }
+  }
+
+  return formatTaskList({ showAll, priorityFilter, showBlocked, page });
 }
 
 async function handleTaskCommand(ctx: PluginCommandContext): Promise<PluginCommandPayload> {
   const args = (ctx.args || "").trim();
   // Use agentId from context (preferred) or fall back to lastSessionInfo
   const agentId = ctx.agentId || lastSessionInfo.agentId || "";
+
+  // Detect if this was triggered by a button click (Telegram echoes callback_data as "/task ...")
+  const isButtonTriggered = args.startsWith("/task ");
+
   if (!args) {
     return { text: buildUsage() };
   }
@@ -392,21 +468,34 @@ async function handleTaskCommand(ctx: PluginCommandContext): Promise<PluginComma
     if (action === "complete") {
       const { completeTask } = getTasksModule();
       const task = completeTask(id, agentId);
+      const msg = `✅ Completed ${task.id}: "${task.title}"`;
       return {
-        text: `Updated ${task.id} -> ${STATUS_LABELS[task.status]}\n${formatTask(task)}`,
+        text: isButtonTriggered ? msg : `Updated ${task.id} -> ${STATUS_LABELS[task.status]}\n${formatTask(task)}`,
       };
     }
 
     if (action === "claim") {
       const { claimTask } = getTasksModule();
       const task = claimTask(id, agentId);
-      return { text: `Claimed ${task.id} -> ${STATUS_LABELS[task.status]}\nClaimed by: ${task.claimedBy} at ${new Date(task.claimedAt!).toLocaleString("en-US", { timeZone: "America/Los_Angeles" })}` };
+      const msg = `✅ Claimed ${task.id}: "${task.title}"\nClaimed by: ${task.claimedBy}`;
+      return { text: isButtonTriggered ? msg : `Claimed ${task.id} -> ${STATUS_LABELS[task.status]}\nClaimed by: ${task.claimedBy} at ${new Date(task.claimedAt!).toLocaleString("en-US", { timeZone: "America/Los_Angeles" })}` };
     }
 
-    if (action === "pause") {
+    if (action === "pause" || action === "status") {
       const { updateTaskStatus } = getTasksModule();
-      const task = updateTaskStatus(id, "BLOCKED");
-      return { text: `Updated ${task.id} -> ${STATUS_LABELS[task.status]}` };
+      // Handle "/task status {id} {status}" syntax from buttons
+      let newStatus = "BLOCKED";
+      if (action === "status" && tokens.length > 0) {
+        newStatus = tokens[0].toUpperCase();
+      }
+      const task = updateTaskStatus(id, newStatus);
+      const msg = `⏸ ${task.id}: "${task.title}" is now ${STATUS_LABELS[task.status]}`;
+      return { text: isButtonTriggered ? msg : `Updated ${task.id} -> ${STATUS_LABELS[task.status]}` };
+    }
+
+    if (action === "view") {
+      const task = findTaskOrThrow(id);
+      return { text: formatTask(task) };
     }
 
     if (action === "delete") {

@@ -574,3 +574,50 @@ After Phase 3 completion:
 ---
 
 **Ready for Phase 3 implementation!** 🚀
+
+---
+
+## 🔘 Interactive UI Implementation Options (Decision Log - 2026-03-20)
+
+### Architecture Decision: How to handle Telegram callback_query events
+
+After deep research into OpenClaw plugin SDK and Telegram channel internals:
+
+| Option | Description | Status |
+|--------|-------------|--------|
+| **A** | Pragmatic Button → Command Routing. Send buttons with `callback_data` encoding CLI commands. User clicks → Telegram echoes `callback_data` as text → existing `/task` command handler processes it. | ✅ **IN PROGRESS** |
+| **B** | Plugin SDK Enhancement. Submit issue/PR to OpenClaw to expose `callback_query` to plugins via `registerCallbackHandler()` or extend `PluginCommandContext` with callback fields. | 📋 **TRACKED** - Pending upstream support |
+| **C** | Custom Gateway Method. Add plugin gateway method (e.g., `gateway:tm_callback`) that routes callback events to registered plugins. | � cold **RESERVED** - Fallback if Option A fails |
+
+### Why Option A was chosen first:
+- Works with current OpenClaw plugin SDK (no architectural changes needed)
+- Buttons with `callback_data` ARE functional — Telegram sends them back as text
+- All existing `/task` command handlers work as-is
+- Buttons provide visual structure and discoverability even if UX is slightly round-trippy
+
+### What Option A looks like:
+```json
+// Sending a task list with inline buttons:
+{
+  "text": "📋 Tasks\n\ntask_001: Fix login bug",
+  "channelData": {
+    "telegram": {
+      "buttons": [
+        [{ "text": "✅ Complete", "callback_data": "/task complete task_001" }],
+        [{ "text": "🙋 Claim", "callback_data": "/task claim task_001" }]
+      ]
+    }
+  }
+}
+```
+
+### What Option B enables (when upstream adds support):
+- True callback handling (no text echo, instant response)
+- Real-time button state updates
+- More sophisticated keyboard layouts
+- Better error handling on stale buttons
+
+### Next Steps:
+1. ✅ **Option A**: Implement pragmatic button → command routing (THIS PHASE)
+2. 📋 **Option B**: File upstream issue to OpenClaw requesting `callback_query` plugin hooks
+3. �冻 **Option C**: Reserve as fallback if Option A proves unworkable in practice
