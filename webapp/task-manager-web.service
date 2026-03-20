@@ -1,0 +1,16 @@
+[Unit]
+Description=Todo Task Manager Web App
+After=network.target
+
+[Service]
+Type=simple
+User=openclaw
+WorkingDirectory=/home/openclaw/projects/todo-task-manager/webapp
+ExecStart=/usr/bin/node /home/openclaw/projects/todo-task-manager/webapp/server.js
+Restart=always
+RestartSec=5
+Environment=NODE_ENV=production
+Environment=PORT=18799
+
+[Install]
+WantedBy=multi-user.target
