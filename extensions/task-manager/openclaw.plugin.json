@@ -1,0 +1,11 @@
+{
+  "id": "task-manager",
+  "name": "Todo Task Manager",
+  "description": "Telegram-first task queue commands for persistent Todo Task Manager tasks.",
+  "version": "0.1.0",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {}
+  }
+}
