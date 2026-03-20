@@ -165,6 +165,8 @@ function filterTasks(showAll: boolean, priorityFilter?: string | null) {
  * @returns A new array containing the same tasks ordered as described above.
  */
 function sortTasks(tasks: Array<{ id: string; status: string; priority?: string }>) {
+  const { TASK_PRIORITIES } = getTasksModule();
+
   return [...tasks].sort((left, right) => {
     const statusDelta =
       Number(ACTIVE_STATUSES.has(right.status)) - Number(ACTIVE_STATUSES.has(left.status));
@@ -175,7 +177,12 @@ function sortTasks(tasks: Array<{ id: string; status: string; priority?: string 
     // Secondary sort: priority (HIGH -> MEDIUM -> LOW)
     const leftPriority = left.priority || "MEDIUM";
     const rightPriority = right.priority || "MEDIUM";
-    const priorityDelta = PRIORITY_ORDER[leftPriority] - PRIORITY_ORDER[rightPriority];
+
+    // Fallback for invalid priorities: map to MEDIUM (safe default)
+    const leftNumeric = TASK_PRIORITIES.includes(leftPriority) ? PRIORITY_ORDER[leftPriority] : PRIORITY_ORDER["MEDIUM"];
+    const rightNumeric = TASK_PRIORITIES.includes(rightPriority) ? PRIORITY_ORDER[rightPriority] : PRIORITY_ORDER["MEDIUM"];
+    const priorityDelta = leftNumeric - rightNumeric;
+
     if (priorityDelta !== 0) {
       return priorityDelta;
     }
@@ -392,6 +399,7 @@ async function handleTaskCommand(ctx: PluginCommandContext): Promise<PluginComma
   try {
     if (action === "add") {
       const { positional, options } = parseOptions(tokens);
+      const { TASK_TYPES, TASK_PRIORITIES } = getTasksModule();
       const title = positional.join(" ").trim();
       if (!title) {
         return {
@@ -404,12 +412,27 @@ async function handleTaskCommand(ctx: PluginCommandContext): Promise<PluginComma
         .map((value) => value.trim())
         .filter(Boolean);
 
+      // Validate and normalize type before toUpperCase()
+      const rawType = options.type || "TASK";
+      const type = String(rawType).toUpperCase();
+      if (!TASK_TYPES.includes(type)) {
+        return {
+          text: `Invalid task type: ${rawType}. Valid types: ${TASK_TYPES.join(", ")}`,
+        };
+      }
+
+      // Validate and normalize priority before toUpperCase()
+      const rawPriority = options.priority || "MEDIUM";
+      const priority = String(rawPriority).toUpperCase();
+      if (!TASK_PRIORITIES.includes(priority)) {
+        return {
+          text: `Invalid priority: ${rawPriority}. Valid priorities: ${TASK_PRIORITIES.join(", ")}`,
+        };
+      }
+
       const { addTask } = getTasksModule();
-      const priority = options.priority
-        ? String(options.priority).toUpperCase()
-        : "MEDIUM";
       const task = addTask({
-        type: String(options.type || "TASK").toUpperCase(),
+        type,
         title,
         prompt: String(options.prompt || ""),
         assignedTo: String(options.assignee || ""),
@@ -456,6 +479,28 @@ async function handleTaskCommand(ctx: PluginCommandContext): Promise<PluginComma
 
     if (action === "edit") {
       const { positional: _optsPositional, options } = parseOptions(tokens.slice(1));
+      const { TASK_TYPES, TASK_PRIORITIES } = getTasksModule();
+
+      // Validate and normalize type before toUpperCase()
+      if (options.type !== undefined) {
+        const type = String(options.type).toUpperCase();
+        if (!TASK_TYPES.includes(type)) {
+          return {
+            text: `Invalid task type: ${options.type}. Valid types: ${TASK_TYPES.join(", ")}`,
+          };
+        }
+      }
+
+      // Validate and normalize priority before toUpperCase()
+      if (options.priority !== undefined) {
+        const priority = String(options.priority).toUpperCase();
+        if (!TASK_PRIORITIES.includes(priority)) {
+          return {
+            text: `Invalid priority: ${options.priority}. Valid priorities: ${TASK_PRIORITIES.join(", ")}`,
+          };
+        }
+      }
+
       const { updateTask } = getTasksModule();
       const task = updateTask(id, {
         title: options.title !== undefined ? String(options.title) : undefined,
