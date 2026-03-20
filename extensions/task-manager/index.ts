@@ -102,6 +102,14 @@ function tokenizeArgs(input: string) {
   return tokens;
 }
 
+/**
+ * Parse a list of command tokens into positional arguments and option flags.
+ *
+ * @param tokens - Array of tokens produced from a tokenized command string (e.g., words and `--name` tokens)
+ * @returns An object with:
+ *  - `positional`: the tokens that do not start with `--`, in original order.
+ *  - `options`: a map of option names (without the `--` prefix) to either a string value (the next token) or `true` when the option is provided without a value.
+ */
 function parseOptions(tokens: string[]) {
   const positional: string[] = [];
   const options: Record<string, string | boolean> = {};
@@ -127,6 +135,13 @@ function parseOptions(tokens: string[]) {
   return { positional, options };
 }
 
+/**
+ * Retrieve tasks filtered by active status and optional priority.
+ *
+ * @param showAll - If true, include tasks of any status; if false, include only active tasks (`OPEN`, `IN_PROGRESS`, `BLOCKED`).
+ * @param priorityFilter - If provided, include only tasks whose `priority` equals this value; tasks missing `priority` are treated as `"MEDIUM"`.
+ * @returns The list of tasks that match the requested filters.
+ */
 function filterTasks(showAll: boolean, priorityFilter?: string | null) {
   const { readTasks } = getTasksModule();
   let tasks = readTasks();
@@ -139,6 +154,16 @@ function filterTasks(showAll: boolean, priorityFilter?: string | null) {
   return tasks;
 }
 
+/**
+ * Sorts tasks by active status, priority, and identifier.
+ *
+ * Tasks that have a status in the active set appear before other tasks. Within the same
+ * status group tasks are ordered by priority with `HIGH` before `MEDIUM` before `LOW`.
+ * Ties are broken by lexicographic comparison of the task `id`.
+ *
+ * @param tasks - Array of task objects containing at least `id` and `status`; `priority` may be omitted.
+ * @returns A new array containing the same tasks ordered as described above.
+ */
 function sortTasks(tasks: Array<{ id: string; status: string; priority?: string }>) {
   return [...tasks].sort((left, right) => {
     const statusDelta =
@@ -159,10 +184,22 @@ function sortTasks(tasks: Array<{ id: string; status: string; priority?: string 
   });
 }
 
+/**
+ * Return the display label for a task priority.
+ *
+ * @param priority - Optional priority identifier (e.g. `"HIGH"`, `"MEDIUM"`, `"LOW"`). If omitted or not found, `"MEDIUM"` is used.
+ * @returns The decorated label string for the resolved priority (defaults to the medium priority label when omitted or unrecognized).
+ */
 function formatPriority(priority?: string): string {
   return PRIORITY_LABELS[priority || "MEDIUM"] || PRIORITY_LABELS.MEDIUM;
 }
 
+/**
+ * Build a compact string of CLI-style action shortcuts for a task.
+ *
+ * @param task - The task object; its `id` is used to populate command examples and its `status` determines whether a claim hint is included.
+ * @returns A single string containing space-separated action hints (claim when `status` is `"OPEN"`, complete, pause, unassign, assign, edit, and delete) with example `/task` commands populated with the task `id`.
+ */
 function formatActionHints(task: { id: string; status: string }) {
   const hints = [];
   if (task.status === "OPEN") {
@@ -177,6 +214,18 @@ function formatActionHints(task: { id: string; status: string }) {
   return hints.join(" ");
 }
 
+/**
+ * Render a task object as a multi-line human-readable string.
+ *
+ * @param task - Task properties:
+ *   - `id`, `type`, `status`, `title`: core identifiers shown on the first lines.
+ *   - `priority` (optional): rendered as a decorated priority label.
+ *   - `assignedTo`, `claimedBy`, `claimedAt`, `completedBy`, `completedAt` (optional): shown as additional lines; timestamps are formatted in America/Los_Angeles when present.
+ *   - `dependsOn` (optional): listed as comma-separated dependencies.
+ *   - `prompt` (optional): included as a `Prompt:` line.
+ *   Action hints are appended when the task's `status` is considered active.
+ * @returns A multi-line string containing the task's priority label, type and id, status and title, followed by optional lines for assignee, claim/completion details, dependencies, prompt, and action hints when applicable.
+ */
 function formatTask(task: {
   id: string;
   type: string;
@@ -230,6 +279,17 @@ function formatTask(task: {
   return lines.join("\n");
 }
 
+/**
+ * Build a human-readable listing of tasks, optionally limited to active tasks or a priority.
+ *
+ * Generates a text payload containing a header (indicating "All" or "Active" tasks and an optional priority bracket),
+ * the configured tasks file path, and either a formatted list of tasks or an appropriate empty-state message with
+ * a usage hint for creating tasks.
+ *
+ * @param param0.showAll - When true, include all tasks; otherwise include only tasks with active statuses.
+ * @param param0.priorityFilter - When provided, restrict tasks to the given priority (case-insensitive string such as "HIGH"); also appended to the header.
+ * @returns A PluginCommandPayload whose `text` field contains the composed task list or an empty-state message.
+ */
 function formatTaskList({ showAll = false, priorityFilter }: { showAll?: boolean; priorityFilter?: string | null } = {}): PluginCommandPayload {
   const { TASKS_FILE } = getTasksModule();
   const tasks = sortTasks(filterTasks(showAll, priorityFilter));
@@ -264,6 +324,15 @@ function findTaskOrThrow(id: string) {
   return task;
 }
 
+/**
+ * Provide a newline-separated usage guide of supported Todo Task Manager commands.
+ *
+ * The returned text contains example invocations for listing tasks and managing tasks
+ * (add, claim, complete, pause, unassign, assign, edit, delete), including sample
+ * options such as `--priority`, `--assignee`, and `--prompt`.
+ *
+ * @returns A single string with example command usages separated by newline characters.
+ */
 function buildUsage() {
   return [
     "Task Manager commands:",
@@ -281,6 +350,14 @@ function buildUsage() {
   ].join("\n");
 }
 
+/**
+ * Handle the `/tasks` command, returning a formatted list of tasks optionally filtered by visibility and priority.
+ *
+ * Recognizes the literal token `all` (case-insensitive) to include non-active tasks and the `--priority` option to filter by priority.
+ *
+ * @param ctx - Plugin command context; `ctx.args` is parsed for tokens and options
+ * @returns A `PluginCommandPayload` containing the rendered task list and related metadata
+ */
 async function handleTasksCommand(ctx: PluginCommandContext): Promise<PluginCommandPayload> {
   const args = (ctx.args || "").trim();
   const tokens = tokenizeArgs(args);
@@ -291,6 +368,12 @@ async function handleTasksCommand(ctx: PluginCommandContext): Promise<PluginComm
   return formatTaskList({ showAll, priorityFilter });
 }
 
+/**
+ * Handle the `/task` command and perform task management actions such as add, claim, complete, edit, assign, unassign, pause, and delete.
+ *
+ * @param ctx - The command context providing `args` and optionally `agentId` used to determine the acting agent and command arguments.
+ * @returns A PluginCommandPayload with a human-readable `text` response. On internal failure the payload includes `isError: true` and `text` contains the error message.
+ */
 async function handleTaskCommand(ctx: PluginCommandContext): Promise<PluginCommandPayload> {
   const args = (ctx.args || "").trim();
   // Use agentId from context (preferred) or fall back to lastSessionInfo
