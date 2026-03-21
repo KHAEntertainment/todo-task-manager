@@ -1,4 +1,4 @@
-import { createRequire } from "module";
+import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
 const TASKS_MODULE_PATH = "/home/openclaw/.openclaw/workspace/skills/task-manager/tasks.js";
@@ -52,6 +52,16 @@ type PluginCommandPayload = {
 function getTasksModule() {
   delete require.cache[TASKS_MODULE_PATH];
   return require(TASKS_MODULE_PATH);
+}
+
+/**
+ * Log task events for audit trail.
+ * Stub implementation - extend as needed with persistent logging.
+ */
+function logTaskEvent(event: { taskId: string; action: string; actor: string; target?: string; timestamp: string }) {
+  // TODO: Implement persistent event logging (file, database, etc.)
+  // For now, just log to console for debugging
+  console.log(`[TASK_EVENT] ${event.timestamp} - ${event.action} - Task: ${event.taskId} - Actor: ${event.actor}${event.target ? ` - Target: ${event.target}` : ''}`);
 }
 
 function tokenizeArgs(input: string) {
@@ -236,108 +246,66 @@ function formatActionHints(task: { id: string; status: string }) {
   return hints.join(" ");
 }
 
-/**
- * Render a task object as a multi-line human-readable string.
- *
- * @param task - Task properties:
- *   - `id`, `type`, `status`, `title`: core identifiers shown on the first lines.
- *   - `priority` (optional): rendered as a decorated priority label.
- *   - `assignedTo`, `claimedBy`, `claimedAt`, `completedBy`, `completedAt` (optional): shown as additional lines; timestamps are formatted in America/Los_Angeles when present.
- *   - `dependsOn` (optional): listed as comma-separated dependencies.
- *   - `prompt` (optional): included as a `Prompt:` line.
- *   Action hints are appended when the task's `status` is considered active.
- * @returns A multi-line string containing the task's priority label, type and id, status and title, followed by optional lines for assignee, claim/completion details, dependencies, prompt, and action hints when applicable.
- */
-function formatTask(task: {
-  id: string;
-  type: string;
-  status: string;
-  title: string;
-  priority?: string;
-  assignedTo?: string;
-  claimedBy?: string;
-  claimedAt?: string;
-  completedBy?: string;
-  completedAt?: string;
-  dependsOn?: string[];
-  prompt?: string;
-}) {
-  const lines = [
-    formatPriority(task.priority),
-    `${TYPE_LABELS[task.type] || task.type} ${task.id}`,
-    `${STATUS_LABELS[task.status] || task.status} ${task.title}`,
-  ];
 
-  if (task.assignedTo) {
-    lines.push(`Assignee: ${task.assignedTo}`);
-  }
+const COMMANDS_REF = `## 🛠️ Task Commands Reference
 
-  if (task.claimedBy) {
-    const claimTime = task.claimedAt
-      ? new Date(task.claimedAt).toLocaleString("en-US", { timeZone: "America/Los_Angeles" })
-      : "";
-    lines.push(`Claimed by: ${task.claimedBy}${claimTime ? ` at ${claimTime}` : ""}`);
-  }
+| Command | Description |
+|---------|-------------|
+| /task claim <id> | Claim an open task |
+| /task complete <id> | Mark task as complete |
+| /task pause <id> | Pause a task |
+| /task unassign <id> | Remove assignee |
+| /task assign <id> --assignee <name> | Reassign task |
+| /task edit <id> --title "..." --prompt "..." --type TASK --assignee <name> | Edit task details |
+| /task delete <id> | Delete task |`;
 
-  if (task.completedBy) {
-    const completeTime = task.completedAt
-      ? new Date(task.completedAt).toLocaleString("en-US", { timeZone: "America/Los_Angeles" })
-      : "";
-    lines.push(`Completed by: ${task.completedBy}${completeTime ? ` at ${completeTime}` : ""}`);
-  }
-
+function formatTaskDetailed(task: any) {
+  const lines = [`### ${task.id} — ${task.status}`];
+  lines.push(`Title: ${task.title}`);
+  if (task.assignedTo) lines.push(`Assignee: ${task.assignedTo}`);
   if (Array.isArray(task.dependsOn) && task.dependsOn.length > 0) {
     lines.push(`Depends on: ${task.dependsOn.join(", ")}`);
   }
-
-  if (task.prompt) {
+  if (task.prompt && task.prompt !== task.title) {
     lines.push(`Prompt: ${task.prompt}`);
   }
-
-  if (ACTIVE_STATUSES.has(task.status)) {
-    lines.push(formatActionHints(task));
-  }
-
   return lines.join("\n");
 }
 
-/**
- * Build a human-readable listing of tasks, optionally limited to active tasks or a priority.
- *
- * Generates a text payload containing a header (indicating "All" or "Active" tasks and an optional priority bracket),
- * the configured tasks file path, and either a formatted list of tasks or an appropriate empty-state message with
- * a usage hint for creating tasks.
- *
- * @param param0.showAll - When true, include all tasks; otherwise include only tasks with active statuses.
- * @param param0.priorityFilter - When provided, restrict tasks to the given priority (case-insensitive string such as "HIGH"); also appended to the header.
- * @returns A PluginCommandPayload whose `text` field contains the composed task list or an empty-state message.
- */
-function formatTaskList({ showAll = false, priorityFilter }: { showAll?: boolean; priorityFilter?: string | null } = {}): PluginCommandPayload {
+function formatTaskTableRow(task: any) {
+  const assignee = task.assignedTo || "—";
+  const deps = (Array.isArray(task.dependsOn) && task.dependsOn.length > 0) ? task.dependsOn.join(", ") : "—";
+  return `| ${task.id} | ${task.status} | ${task.title} | ${assignee} | ${deps} |`;
+}
+
+function formatTaskList({ showAll = false, detailed = false }: { showAll?: boolean, detailed?: boolean } = {}): PluginCommandPayload {
   const { TASKS_FILE } = getTasksModule();
-  const tasks = sortTasks(filterTasks(showAll, priorityFilter));
-  let header = showAll
-    ? "📋 Todo Task Manager - All Tasks"
-    : "📋 Todo Task Manager - Active Tasks";
-  if (priorityFilter) {
-    header += ` [${formatPriority(priorityFilter)}]`;
-  }
+  const tasks = sortTasks(filterTasks(showAll));
+  
+  const header = showAll ? "# 📋 Todo Task Manager - All Tasks" : "# 📋 Todo Task Manager - Active Tasks";
 
   if (tasks.length === 0) {
     return {
-      text: showAll
-        ? `${header}\nTasks file: ${TASKS_FILE}\n\nNo tasks found.\nUse /task add "Title" --prompt "Full prompt" --priority HIGH to create one.`
-        : `${header}\nTasks file: ${TASKS_FILE}\n\nNo active tasks.\nUse /task add "Title" --prompt "Full prompt" --priority HIGH to create one.`,
+      text: `${header}\nTasks file: ${TASKS_FILE}\n\nNo tasks found.\nUse /task add "Title" --prompt "Full prompt" to create one.`
     };
   }
 
-  const body = tasks.map(formatTask).join("\n\n");
+  let text = `${header}\nTasks file: ${TASKS_FILE}\n\n`;
 
-  return {
-    text: `${header}\nTasks file: ${TASKS_FILE}\n\n${body}`,
-  };
+  if (detailed) {
+    text += tasks.map(formatTaskDetailed).join("\n\n---\n\n");
+  } else {
+    text += "Use /tasks:commands for available functions.\n\n---\n\n";
+    text += "| ID | Status | Title | Assignee | Dependencies |\n";
+    text += "|:---|:-------|:------|:---------|:-------------|\n";
+    text += tasks.map(formatTaskTableRow).join("\n");
+  }
+
+  return { text };
 }
 
 function findTaskOrThrow(id: string) {
+
   const { readTasks } = getTasksModule();
   const task = readTasks().find((entry: { id: string }) => entry.id === id);
   if (!task) {
@@ -383,36 +351,23 @@ function buildUsage() {
 async function handleTasksCommand(ctx: PluginCommandContext): Promise<PluginCommandPayload> {
   const args = (ctx.args || "").trim();
   const tokens = tokenizeArgs(args);
-  const { options } = parseOptions(tokens);
-
-  // Compute positional tokens (non-option tokens) to check for "all"
-  const positionalTokens: string[] = [];
-  for (let index = 0; index < tokens.length; index += 1) {
-    const token = tokens[index];
-    if (token.startsWith("--")) {
-      // Skip option flag
-      const next = tokens[index + 1];
-      // If next token exists and doesn't start with "--", skip it as the value
-      if (next && !next.startsWith("--")) {
-        index += 1;
-      }
-    } else {
-      positionalTokens.push(token);
-    }
+  
+  // Commands reference
+  if (tokens.includes("commands") || tokens.includes(":commands") || args.includes("commands") || args.includes(":commands")) {
+    return { text: COMMANDS_REF };
   }
 
-  const showAll = positionalTokens.some(t => t.toLowerCase() === "all");
+  // Parse flags
+  const showAll = tokens.includes("all");
+  const detailed = tokens.includes("detailed") || tokens.includes("--detailed") || tokens.includes("full");
 
-  // Validate priority option
-  const priorityFilter = validatePriority(options.priority);
-  if (options.priority !== undefined && !priorityFilter) {
-    return {
-      text: `Invalid priority: ${options.priority}. Valid priorities: HIGH, MEDIUM, LOW`,
-      isError: true,
-    };
+  // By default, use minimal table view
+  if (!showAll && !detailed) {
+    return formatMinimalTaskList({ showAll });
   }
 
-  return formatTaskList({ showAll, priorityFilter });
+  // Detailed view or 'all' shows full details
+  return formatTaskList({ showAll, detailed });
 }
 
 /**
@@ -494,7 +449,7 @@ async function handleTaskCommand(ctx: PluginCommandContext): Promise<PluginComma
       const { completeTask } = getTasksModule();
       const task = completeTask(id, agentId);
       return {
-        text: `Updated ${task.id} -> ${STATUS_LABELS[task.status]}\n${formatTask(task)}`,
+        text: `Updated ${task.id} -> ${STATUS_LABELS[task.status]}\n${formatTaskDetailed(task)}`,
       };
     }
 
@@ -552,7 +507,7 @@ async function handleTaskCommand(ctx: PluginCommandContext): Promise<PluginComma
         priority: validatedPriority,
       });
       return {
-        text: `Updated ${task.id}\n${formatTask(task)}`,
+        text: `Updated ${task.id}\n${formatTaskDetailed(task)}`,
       };
     }
 
@@ -642,9 +597,7 @@ function formatTaskDiscovery(agentId: string): string {
     if (task.prompt) {
       lines.push(`  Prompt: ${task.prompt}`);
     }
-    lines.push(
-      `  Actions: /task claim ${task.id} | /task complete ${task.id} | /task pause ${task.id}`,
-    );
+
   }
 
   lines.push("");
@@ -697,7 +650,7 @@ function registerSessionHooks(api: {
 
 export {
   buildUsage,
-  formatTask,
+  formatTaskDetailed,
   formatTaskList,
   getTasksModule,
   handleTaskCommand,
@@ -706,16 +659,154 @@ export {
   tokenizeArgs,
 };
 
-export default function register(api: {
-  registerCommand: (definition: {
-    name: string;
-    description: string;
-    acceptsArgs: boolean;
-    handler: (ctx: PluginCommandContext) => Promise<PluginCommandPayload>;
-  }) => void;
-  on: (event: string, handler: (event: unknown, ctx: unknown) => unknown) => void;
-  logger: { info: (msg: string) => void; warn: (msg: string) => void };
-}) {
+export default function register(api: any) {
+
+  api.registerTool({
+    name: "task_manager",
+    description: "Manage Todo tasks. Agents MUST use this tool to interact with their assigned tasks (claim, complete, status, etc).",
+    schema: {
+      type: "object",
+      required: ["action"],
+      properties: {
+        action: {
+          type: "string",
+          description: "Action to perform: list, add, claim, complete, status, delete, pause, edit",
+          enum: ["list", "add", "claim", "complete", "status", "delete", "pause", "edit"]
+        },
+        taskId: {
+          type: "string",
+          description: "Task ID (required for claim, complete, status, delete)"
+        },
+        title: {
+          type: "string",
+          description: "Task title (required for add)"
+        },
+        prompt: {
+          type: "string",
+          description: "Full task prompt (optional for add)"
+        },
+        assignee: {
+          type: "string",
+          description: "Agent to assign the task to (optional for add)"
+        },
+        priority: {
+          type: "string",
+          description: "Task priority (HIGH, MEDIUM, LOW) (optional for add)"
+        },
+        status: {
+          type: "string",
+          description: "New status for the task (required for action=status). Allowed values: OPEN, IN_PROGRESS, COMPLETED, CANCELLED, BLOCKED",
+          enum: ["OPEN", "IN_PROGRESS", "COMPLETED", "CANCELLED", "BLOCKED"]
+        }
+      }
+    },
+    execute: async (params, ctx) => {
+      const { action, taskId, title, prompt, assignee, priority, status } = params;
+      const { readTasks, addTask, claimTask, completeTask, updateTaskStatus, deleteTask } = getTasksModule();
+      const agentId = ctx.agentId || "unknown";
+
+      try {
+        if (action === "list") {
+          const result = readTasks();
+          return { success: true, message: "Tasks retrieved", tasks: result };
+        }
+        
+        if (action === "add") {
+          if (!title) throw new Error("Missing title for task");
+          const task = addTask({
+            title,
+            prompt: prompt || title,
+            type: "TASK",
+            assignedTo: assignee || "",
+            priority: (priority || "MEDIUM").toUpperCase(),
+            dependsOn: []
+          });
+          logTaskEvent({ taskId: task.id, action: "assigned", actor: agentId, target: task.assignedTo || "unassigned", timestamp: new Date().toISOString() });
+          return { success: true, message: `Task created: ${task.id}`, task };
+        }
+
+        if (!taskId) throw new Error("Missing taskId for action");
+
+        if (action === "claim") {
+          const task = claimTask(taskId, agentId);
+          logTaskEvent({ taskId: task.id, action: "claimed", actor: agentId, target: task.assignedTo, timestamp: new Date().toISOString() });
+          return { success: true, message: `Task claimed: ${task.id}`, task };
+        }
+
+        if (action === "complete") {
+          const task = completeTask(taskId, agentId);
+          logTaskEvent({ taskId: task.id, action: "completed", actor: agentId, timestamp: new Date().toISOString() });
+          return { success: true, message: `Task completed: ${task.id}`, task };
+        }
+
+        if (action === "status") {
+          if (!status) throw new Error("Missing status for action=status");
+          const task = updateTaskStatus(taskId, status.toUpperCase());
+
+          let eventAction = "status_changed";
+          if (status.toUpperCase() === "IN_PROGRESS") eventAction = "resumed";
+          if (status.toUpperCase() === "CANCELLED") eventAction = "cancelled";
+          if (status.toUpperCase() === "BLOCKED") eventAction = "paused";
+          if (status.toUpperCase() === "COMPLETED") eventAction = "completed";
+
+          logTaskEvent({ taskId: task.id, action: eventAction, actor: agentId, timestamp: new Date().toISOString() });
+          return { success: true, message: `Task status updated: ${task.id} -> ${task.status}`, task };
+        }
+
+        if (action === "delete") {
+          deleteTask(taskId);
+          logTaskEvent({ taskId, action: "cancelled", actor: agentId, timestamp: new Date().toISOString() });
+          return { success: true, message: `Task deleted: ${taskId}` };
+        }
+
+        if (action === "pause") {
+          const task = updateTaskStatus(taskId, "BLOCKED");
+          logTaskEvent({ taskId: task.id, action: "paused", actor: agentId, timestamp: new Date().toISOString() });
+          return { success: true, message: `Task paused: ${task.id}`, task };
+        }
+
+        if (action === "edit") {
+          const { updateTask } = getTasksModule();
+          const updates: any = {};
+          if (params.title !== undefined) updates.title = params.title;
+          if (params.prompt !== undefined) updates.prompt = params.prompt;
+          if (params.assignee !== undefined) updates.assignedTo = params.assignee;
+          const task = updateTask(taskId, updates);
+          logTaskEvent({ taskId: task.id, action: "edited", actor: agentId, timestamp: new Date().toISOString() });
+          return { success: true, message: `Task edited: ${task.id}`, task };
+        }
+
+        throw new Error(`Unknown action: ${action}`);
+      } catch (err) {
+        return { success: false, error: err instanceof Error ? err.message : String(err) };
+      }
+    }
+  });
+  
   registerTaskManagerCommands(api);
   registerSessionHooks(api);
+}
+
+function formatMinimalTaskList({ showAll = false }: { showAll?: boolean } = {}): PluginCommandPayload {
+  const { TASKS_FILE } = getTasksModule();
+  const tasks = sortTasks(filterTasks(showAll));
+  
+  const header = showAll ? "# 📋 Todo Task Manager - All Tasks" : "# 📋 Todo Task Manager - Active Tasks";
+
+  if (tasks.length === 0) {
+    return {
+      text: `${header}\nTasks file: ${TASKS_FILE}\n\nNo active tasks.\nUse /task add "Title" to create one.`,
+    };
+  }
+
+  const assignee = (task: any) => task.assignedTo || "—";
+  const deps = (task: any) => (Array.isArray(task.dependsOn) && task.dependsOn.length > 0) ? task.dependsOn.join(", ") : "—";
+
+  const rows = tasks.map(task => 
+    `| ${task.id} | ${task.status} | ${task.title} | ${assignee(task)} | ${deps(task)} |`
+  ).join("\n");
+
+  return {
+    text: `${header}\nTasks file: ${TASKS_FILE}\n\n| ID | Status | Title | Assignee | Dependencies |\n|:---|:-------|:------|:---------|:-------------|\n${rows}`,
+  };
 }
