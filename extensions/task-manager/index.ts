@@ -2,6 +2,7 @@ import { createRequire } from "module";
 
 const require = createRequire(import.meta.url);
 const TASKS_MODULE_PATH = "/home/openclaw/.openclaw/workspace/skills/task-manager/tasks.js";
+const EVENT_LOG_FILE = "/home/openclaw/.openclaw/workspace/tasks/events.json";
 
 const TYPE_LABELS: Record<string, string> = {
   EPIC: "🎯 EPIC",
