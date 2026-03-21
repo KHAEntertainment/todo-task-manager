@@ -17,8 +17,8 @@ const toolRegistration = `
       properties: {
         action: {
           type: "string",
-          description: "Action to perform: list, add, claim, complete, status, delete",
-          enum: ["list", "add", "claim", "complete", "status", "delete"]
+          description: "Action to perform: list, add, claim, complete, status, delete, pause, edit",
+          enum: ["list", "add", "claim", "complete", "status", "delete", "pause", "edit"]
         },
         taskId: {
           type: "string",
@@ -87,13 +87,41 @@ const toolRegistration = `
         if (action === "status") {
           if (!status) throw new Error("Missing status for action=status");
           const task = updateTaskStatus(taskId, status.toUpperCase());
-          
-          let eventAction = "paused";
-          if (status.toUpperCase() === "IN_PROGRESS") eventAction = "resumed";
-          if (status.toUpperCase() === "CANCELLED") eventAction = "cancelled";
+
+          const statusMap = {
+            "IN_PROGRESS": "resumed",
+            "PAUSED": "paused",
+            "CANCELLED": "cancelled",
+            "BLOCKED": "blocked"
+          };
+          const eventAction = statusMap[status.toUpperCase()] || status.toUpperCase().toLowerCase();
 
           logTaskEvent({ taskId: task.id, action: eventAction, actor: agentId, timestamp: new Date().toISOString() });
           return { success: true, message: \`Task status updated: \${task.id} -> \${task.status}\`, task };
+        }
+
+        if (action === "pause") {
+          const task = updateTaskStatus(taskId, "PAUSED");
+          logTaskEvent({ taskId: task.id, action: "paused", actor: agentId, timestamp: new Date().toISOString() });
+          return { success: true, message: \`Task paused: \${task.id}\`, task };
+        }
+
+        if (action === "edit") {
+          if (!title && !prompt && !priority && !assignee) {
+            throw new Error("At least one field (title, prompt, priority, assignee) must be provided for edit");
+          }
+          const { readTasks, addTask, claimTask, completeTask, updateTaskStatus, deleteTask } = getTasksModule();
+          const tasks = readTasks();
+          const task = tasks.find(t => t.id === taskId);
+          if (!task) throw new Error(\`Task not found: \${taskId}\`);
+
+          if (title) task.title = title;
+          if (prompt) task.prompt = prompt;
+          if (priority) task.priority = priority.toUpperCase();
+          if (assignee) task.assignedTo = assignee;
+
+          logTaskEvent({ taskId: task.id, action: "edited", actor: agentId, timestamp: new Date().toISOString() });
+          return { success: true, message: \`Task edited: \${task.id}\`, task };
         }
 
         if (action === "delete") {
