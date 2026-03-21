@@ -1,6 +1,9 @@
 import fs from "fs";
+import path from "path";
+import { fileURLToPath } from "url";
 
-const file = "/home/openclaw/projects/todo-task-manager/extensions/task-manager/index.ts";
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const file = path.join(__dirname, "index.ts");
 let content = fs.readFileSync(file, "utf8");
 
 const toolRegistration = `
@@ -106,10 +109,24 @@ const toolRegistration = `
     }
   });`;
 
+// Check if already injected (idempotency check)
+if (content.includes("api.registerTool") || /registerTool\(/.test(content)) {
+  console.log("Tool already registered - skipping injection");
+  process.exit(0);
+}
+
+// Perform replacement
+const originalContent = content;
 content = content.replace(
   /export default function register\(api.*\{/,
   `export default function register(api: any) {${toolRegistration}`
 );
+
+// Verify replacement succeeded
+if (content === originalContent) {
+  console.error("ERROR: Failed to find 'export default function register(api' pattern in file");
+  process.exit(1);
+}
 
 fs.writeFileSync(file, content, "utf8");
 console.log("Tool registered!");
