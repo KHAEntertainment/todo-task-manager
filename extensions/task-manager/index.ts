@@ -596,15 +596,7 @@ export default function register(api: any) {
       }
     }
   });
-  registerCommand: (definition: {
-    name: string;
-    description: string;
-    acceptsArgs: boolean;
-    handler: (ctx: PluginCommandContext) => Promise<PluginCommandPayload>;
-  }) => void;
-  on: (event: string, handler: (event: unknown, ctx: unknown) => unknown) => void;
-  logger: { info: (msg: string) => void; warn: (msg: string) => void };
-}) {
+  
   registerTaskManagerCommands(api);
   registerSessionHooks(api);
 }
