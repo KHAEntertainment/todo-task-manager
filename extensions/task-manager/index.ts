@@ -46,7 +46,8 @@ type PluginCommandContext = {
 
 type TelegramButton = {
   text: string;
-  callback_data: string;
+  callback_data?: string;
+  web_app?: { url: string };
 };
 
 type TelegramButtons = TelegramButton[][];
@@ -251,10 +252,10 @@ function formatTask(task: {
     lines.push(`Prompt: ${task.prompt}`);
   }
 
-  if (ACTIVE_STATUSES.has(task.status)) {
-    lines.push(formatActionHints(task));
-  }
 
+  if (ACTIVE_STATUSES.has(task.status)) {
+    lines.push(`  Actions: /task claim ${task.id} | /task complete ${task.id} | /task pause ${task.id}`);
+  }
   return lines.join("\n");
 }
 
@@ -299,7 +300,7 @@ function formatTaskList({ showAll = false, priorityFilter, showBlocked, page = 0
   const buttonRows: TelegramButton[][] = pageTasks.map((task: { id: string; status: string; claimedBy?: string }) => {
     const rows: TelegramButton[] = [];
 
-    // Complete button (always show for active tasks)
+    // Complete button
     rows.push({ text: `✅ Complete ${task.id}`, callback_data: `/task complete ${task.id}` });
 
     // Claim/Resume button
@@ -310,7 +311,7 @@ function formatTaskList({ showAll = false, priorityFilter, showBlocked, page = 0
       rows.push({ text: `▶️ Resume ${task.id}`, callback_data: `/task status ${task.id} IN_PROGRESS` });
     }
 
-    // Pause button (for non-completed tasks)
+    // Pause button
     if (task.status !== "COMPLETED" && task.status !== "CANCELLED") {
       rows.push({ text: `⏸ Pause ${task.id}`, callback_data: `/task pause ${task.id}` });
     }
