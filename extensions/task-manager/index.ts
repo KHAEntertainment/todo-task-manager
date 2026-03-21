@@ -136,6 +136,21 @@ function parseOptions(tokens: string[]) {
 }
 
 /**
+ * Validate a priority value against the allowed set.
+ *
+ * @param value - The raw priority value to validate (can be string, boolean, or any type from options)
+ * @returns The uppercased priority if valid ("HIGH", "MEDIUM", or "LOW"), or null if invalid
+ */
+function validatePriority(value: string | boolean | undefined | null): string | null {
+  if (!value || typeof value === "boolean") {
+    return null;
+  }
+  const normalized = String(value).toUpperCase();
+  const { TASK_PRIORITIES } = getTasksModule();
+  return TASK_PRIORITIES.includes(normalized) ? normalized : null;
+}
+
+/**
  * Retrieve tasks filtered by active status and optional priority.
  *
  * @param showAll - If true, include tasks of any status; if false, include only active tasks (`OPEN`, `IN_PROGRESS`, `BLOCKED`).
@@ -369,8 +384,33 @@ async function handleTasksCommand(ctx: PluginCommandContext): Promise<PluginComm
   const args = (ctx.args || "").trim();
   const tokens = tokenizeArgs(args);
   const { options } = parseOptions(tokens);
-  const showAll = tokens.some(t => t.toLowerCase() === "all");
-  const priorityFilter = options.priority ? String(options.priority).toUpperCase() : null;
+
+  // Compute positional tokens (non-option tokens) to check for "all"
+  const positionalTokens: string[] = [];
+  for (let index = 0; index < tokens.length; index += 1) {
+    const token = tokens[index];
+    if (token.startsWith("--")) {
+      // Skip option flag
+      const next = tokens[index + 1];
+      // If next token exists and doesn't start with "--", skip it as the value
+      if (next && !next.startsWith("--")) {
+        index += 1;
+      }
+    } else {
+      positionalTokens.push(token);
+    }
+  }
+
+  const showAll = positionalTokens.some(t => t.toLowerCase() === "all");
+
+  // Validate priority option
+  const priorityFilter = validatePriority(options.priority);
+  if (options.priority !== undefined && !priorityFilter) {
+    return {
+      text: `Invalid priority: ${options.priority}. Valid priorities: HIGH, MEDIUM, LOW`,
+      isError: true,
+    };
+  }
 
   return formatTaskList({ showAll, priorityFilter });
 }
@@ -423,8 +463,8 @@ async function handleTaskCommand(ctx: PluginCommandContext): Promise<PluginComma
 
       // Validate and normalize priority before toUpperCase()
       const rawPriority = options.priority || "MEDIUM";
-      const priority = String(rawPriority).toUpperCase();
-      if (!TASK_PRIORITIES.includes(priority)) {
+      const priority = validatePriority(rawPriority);
+      if (!priority) {
         return {
           text: `Invalid priority: ${rawPriority}. Valid priorities: ${TASK_PRIORITIES.join(", ")}`,
         };
@@ -492,13 +532,15 @@ async function handleTaskCommand(ctx: PluginCommandContext): Promise<PluginComma
       }
 
       // Validate and normalize priority before toUpperCase()
+      let validatedPriority: string | undefined = undefined;
       if (options.priority !== undefined) {
-        const priority = String(options.priority).toUpperCase();
-        if (!TASK_PRIORITIES.includes(priority)) {
+        const priority = validatePriority(options.priority);
+        if (!priority) {
           return {
             text: `Invalid priority: ${options.priority}. Valid priorities: ${TASK_PRIORITIES.join(", ")}`,
           };
         }
+        validatedPriority = priority;
       }
 
       const { updateTask } = getTasksModule();
@@ -507,7 +549,7 @@ async function handleTaskCommand(ctx: PluginCommandContext): Promise<PluginComma
         prompt: options.prompt !== undefined ? String(options.prompt) : undefined,
         type: options.type !== undefined ? String(options.type).toUpperCase() : undefined,
         assignedTo: options.assignee !== undefined ? String(options.assignee) : undefined,
-        priority: options.priority !== undefined ? String(options.priority).toUpperCase() : undefined,
+        priority: validatedPriority,
       });
       return {
         text: `Updated ${task.id}\n${formatTask(task)}`,
