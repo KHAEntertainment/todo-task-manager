@@ -143,7 +143,7 @@ Tasks can depend on other tasks using `dependsOn: ["task_001", "task_002"]`.
 - When a dependency completes, dependent tasks automatically unblock
 
 **Example:**
-```
+```text
 task_001: "Setup project" (COMPLETED)
 task_002: "Configure build" (OPEN, blocked by: task_001)
 
@@ -195,7 +195,7 @@ task_003: "Write tests" (OPEN, blocked by: task_001)
 
 ## Project Structure
 
-```
+```text
 todo-task-manager/
 ├── extensions/
 │   └── task-manager/
