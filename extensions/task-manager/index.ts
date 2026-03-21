@@ -151,80 +151,66 @@ function formatActionHints(task: { id: string; status: string }) {
   return hints.join(" ");
 }
 
-function formatTask(task: {
-  id: string;
-  type: string;
-  status: string;
-  title: string;
-  assignedTo?: string;
-  claimedBy?: string;
-  claimedAt?: string;
-  completedBy?: string;
-  completedAt?: string;
-  dependsOn?: string[];
-  prompt?: string;
-}) {
-  const lines = [
-    `${TYPE_LABELS[task.type] || task.type} ${task.id}`,
-    `${STATUS_LABELS[task.status] || task.status} ${task.title}`,
-  ];
 
-  if (task.assignedTo) {
-    lines.push(`Assignee: ${task.assignedTo}`);
-  }
+const COMMANDS_REF = `## 🛠️ Task Commands Reference
 
-  if (task.claimedBy) {
-    const claimTime = task.claimedAt
-      ? new Date(task.claimedAt).toLocaleString("en-US", { timeZone: "America/Los_Angeles" })
-      : "";
-    lines.push(`Claimed by: ${task.claimedBy}${claimTime ? ` at ${claimTime}` : ""}`);
-  }
+| Command | Description |
+|---------|-------------|
+| /task claim <id> | Claim an open task |
+| /task complete <id> | Mark task as complete |
+| /task pause <id> | Pause a task |
+| /task unassign <id> | Remove assignee |
+| /task assign <id> --assignee <name> | Reassign task |
+| /task edit <id> --title "..." --prompt "..." --type TASK --assignee <name> | Edit task details |
+| /task delete <id> | Delete task |`;
 
-  if (task.completedBy) {
-    const completeTime = task.completedAt
-      ? new Date(task.completedAt).toLocaleString("en-US", { timeZone: "America/Los_Angeles" })
-      : "";
-    lines.push(`Completed by: ${task.completedBy}${completeTime ? ` at ${completeTime}` : ""}`);
-  }
-
+function formatTaskDetailed(task: any) {
+  const lines = [`### ${task.id} — ${task.status}`];
+  lines.push(`Title: ${task.title}`);
+  if (task.assignedTo) lines.push(`Assignee: ${task.assignedTo}`);
   if (Array.isArray(task.dependsOn) && task.dependsOn.length > 0) {
     lines.push(`Depends on: ${task.dependsOn.join(", ")}`);
   }
-
-  if (task.prompt) {
+  if (task.prompt && task.prompt !== task.title) {
     lines.push(`Prompt: ${task.prompt}`);
   }
-
-  if (ACTIVE_STATUSES.has(task.status)) {
-    lines.push(formatActionHints(task));
-  }
-
   return lines.join("\n");
 }
 
-function formatTaskList({ showAll = false }: { showAll?: boolean } = {}): PluginCommandPayload {
+function formatTaskTableRow(task: any) {
+  const assignee = task.assignedTo || "—";
+  const deps = (Array.isArray(task.dependsOn) && task.dependsOn.length > 0) ? task.dependsOn.join(", ") : "—";
+  return `| ${task.id} | ${task.status} | ${task.title} | ${assignee} | ${deps} |`;
+}
+
+function formatTaskList({ showAll = false, detailed = false }: { showAll?: boolean, detailed?: boolean } = {}): PluginCommandPayload {
   const { TASKS_FILE } = getTasksModule();
   const tasks = sortTasks(filterTasks(showAll));
-  const header = showAll
-    ? "📋 Todo Task Manager - All Tasks"
-    : "📋 Todo Task Manager - Active Tasks";
+  
+  const header = showAll ? "# 📋 Todo Task Manager - All Tasks" : "# 📋 Todo Task Manager - Active Tasks";
 
   if (tasks.length === 0) {
     return {
-      text: showAll
-        ? `${header}\nTasks file: ${TASKS_FILE}\n\nNo tasks found.\nUse /task add "Title" --prompt "Full prompt" to create one.`
-        : `${header}\nTasks file: ${TASKS_FILE}\n\nNo active tasks.\nUse /task add "Title" --prompt "Full prompt" to create one.`,
+      text: `${header}\nTasks file: ${TASKS_FILE}\n\nNo tasks found.\nUse /task add "Title" --prompt "Full prompt" to create one.`
     };
   }
 
-  const body = tasks.map(formatTask).join("\n\n");
+  let text = `${header}\nTasks file: ${TASKS_FILE}\n\n`;
 
-  return {
-    text: `${header}\nTasks file: ${TASKS_FILE}\n\n${body}`,
-  };
+  if (detailed) {
+    text += tasks.map(formatTaskDetailed).join("\n\n---\n\n");
+  } else {
+    text += "Use /tasks:commands for available functions.\n\n---\n\n";
+    text += "| ID | Status | Title | Assignee | Dependencies |\n";
+    text += "|:---|:-------|:------|:---------|:-------------|\n";
+    text += tasks.map(formatTaskTableRow).join("\n");
+  }
+
+  return { text };
 }
 
 function findTaskOrThrow(id: string) {
+
   const { readTasks } = getTasksModule();
   const task = readTasks().find((entry: { id: string }) => entry.id === id);
   if (!task) {
@@ -250,8 +236,17 @@ function buildUsage() {
 }
 
 async function handleTasksCommand(ctx: PluginCommandContext): Promise<PluginCommandPayload> {
-  const showAll = (ctx.args || "").trim().toLowerCase() === "all";
-  return formatTaskList({ showAll });
+  const args = (ctx.args || "").trim();
+  const tokens = tokenizeArgs(args);
+  
+  if (tokens.includes("commands") || tokens.includes(":commands") || args.includes("commands") || args.includes(":commands")) {
+    return { text: COMMANDS_REF };
+  }
+
+  const showAll = tokens.includes("all");
+  const detailed = tokens.includes("detailed") || tokens.includes("--detailed") || tokens.includes("full");
+  
+  return formatTaskList({ showAll, detailed });
 }
 
 async function handleTaskCommand(ctx: PluginCommandContext): Promise<PluginCommandPayload> {
@@ -307,7 +302,7 @@ async function handleTaskCommand(ctx: PluginCommandContext): Promise<PluginComma
       const { completeTask } = getTasksModule();
       const task = completeTask(id, agentId);
       return {
-        text: `Updated ${task.id} -> ${STATUS_LABELS[task.status]}\n${formatTask(task)}`,
+        text: `Updated ${task.id} -> ${STATUS_LABELS[task.status]}\n${formatTaskDetailed(task)}`,
       };
     }
 
@@ -340,7 +335,7 @@ async function handleTaskCommand(ctx: PluginCommandContext): Promise<PluginComma
         assignedTo: options.assignee !== undefined ? String(options.assignee) : undefined,
       });
       return {
-        text: `Updated ${task.id}\n${formatTask(task)}`,
+        text: `Updated ${task.id}\n${formatTaskDetailed(task)}`,
       };
     }
 
@@ -430,9 +425,7 @@ function formatTaskDiscovery(agentId: string): string {
     if (task.prompt) {
       lines.push(`  Prompt: ${task.prompt}`);
     }
-    lines.push(
-      `  Actions: /task claim ${task.id} | /task complete ${task.id} | /task pause ${task.id}`,
-    );
+
   }
 
   lines.push("");
