@@ -8,9 +8,8 @@ import { parseArgs } from "util";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Assume the tasks module is in the same directory for this script
-// When copied to ~/.openclaw/workspace/skills/task-manager/, it will sit next to tasks.js
-const TASKS_JS_PATH = "/home/openclaw/.openclaw/workspace/skills/task-manager/tasks.js";
+// Resolve tasks.js relative to this script
+const TASKS_JS_PATH = path.join(__dirname, "tasks.js");
 
 try {
   const tasksModule = await import(TASKS_JS_PATH);
@@ -26,12 +25,13 @@ try {
   
   // Minimal CLI router based on tasks module exports
   switch (action) {
-    case "list":
+    case "list": {
       const allTasks = tasksModule.readTasks();
       console.log(JSON.stringify(allTasks, null, 2));
       break;
+    }
 
-    case "add":
+    case "add": {
       const { values: addOptions, positionals: addPos } = parseArgs({
         args: args.slice(1),
         options: {
@@ -44,13 +44,13 @@ try {
         },
         allowPositionals: true
       });
-      
+
       const title = addPos[0] || addOptions.title;
       if (!title) {
         console.error("Error: --title is required");
         process.exit(1);
       }
-      
+
       const newTask = tasksModule.addTask({
         title,
         prompt: addOptions.prompt || title,
@@ -61,46 +61,53 @@ try {
       });
       console.log(`Created Task: ${newTask.id}`);
       break;
+    }
 
-    case "claim":
+    case "claim": {
       if (!args[1]) throw new Error("Missing taskId");
       const agentId = args[2] || process.env.USER || "cli";
       const claimedTask = tasksModule.claimTask(args[1], agentId);
       console.log(`Claimed Task: ${claimedTask.id} by ${claimedTask.claimedBy}`);
       break;
+    }
 
-    case "complete":
+    case "complete": {
       if (!args[1]) throw new Error("Missing taskId");
       const completeAgentId = args[2] || process.env.USER || "cli";
       const completedTask = tasksModule.completeTask(args[1], completeAgentId);
       console.log(`Completed Task: ${completedTask.id}`);
       break;
+    }
 
-    case "assign":
+    case "assign": {
       if (!args[1] || !args[2]) throw new Error("Missing taskId or assignee");
       const assignedTask = tasksModule.updateTask(args[1], { assignedTo: args[2] });
       console.log(`Assigned Task: ${assignedTask.id} to ${assignedTask.assignedTo}`);
       break;
-      
-    case "unassign":
+    }
+
+    case "unassign": {
       if (!args[1]) throw new Error("Missing taskId");
       const unassignedTask = tasksModule.unassignTask(args[1]);
       console.log(`Unassigned Task: ${unassignedTask.id}`);
       break;
+    }
 
     case "pause":
-    case "status":
+    case "status": {
       if (!args[1]) throw new Error("Missing taskId");
       const status = action === "pause" ? "PAUSED" : (args[2] ? args[2].toUpperCase() : "PAUSED");
       const statusTask = tasksModule.updateTaskStatus(args[1], status);
       console.log(`Updated Task Status: ${statusTask.id} -> ${statusTask.status}`);
       break;
-      
-    case "delete":
+    }
+
+    case "delete": {
       if (!args[1]) throw new Error("Missing taskId");
       tasksModule.deleteTask(args[1]);
       console.log(`Deleted Task: ${args[1]}`);
       break;
+    }
 
     default:
       console.error(`Unknown action: ${action}`);

@@ -506,8 +506,8 @@ export default function register(api: any) {
       properties: {
         action: {
           type: "string",
-          description: "Action to perform: list, add, claim, complete, status, delete",
-          enum: ["list", "add", "claim", "complete", "status", "delete"]
+          description: "Action to perform: list, add, claim, complete, status, delete, pause, edit",
+          enum: ["list", "add", "claim", "complete", "status", "delete", "pause", "edit"]
         },
         taskId: {
           type: "string",
@@ -531,7 +531,8 @@ export default function register(api: any) {
         },
         status: {
           type: "string",
-          description: "New status for the task (required for action=status) (e.g. IN_PROGRESS, PAUSED, BLOCKED)"
+          description: "New status for the task (required for action=status). Allowed values: OPEN, IN_PROGRESS, COMPLETED, CANCELLED, BLOCKED",
+          enum: ["OPEN", "IN_PROGRESS", "COMPLETED", "CANCELLED", "BLOCKED"]
         }
       }
     },
@@ -576,10 +577,12 @@ export default function register(api: any) {
         if (action === "status") {
           if (!status) throw new Error("Missing status for action=status");
           const task = updateTaskStatus(taskId, status.toUpperCase());
-          
-          let eventAction = "paused";
+
+          let eventAction = "status_changed";
           if (status.toUpperCase() === "IN_PROGRESS") eventAction = "resumed";
           if (status.toUpperCase() === "CANCELLED") eventAction = "cancelled";
+          if (status.toUpperCase() === "BLOCKED") eventAction = "paused";
+          if (status.toUpperCase() === "COMPLETED") eventAction = "completed";
 
           logTaskEvent({ taskId: task.id, action: eventAction, actor: agentId, timestamp: new Date().toISOString() });
           return { success: true, message: `Task status updated: ${task.id} -> ${task.status}`, task };
@@ -589,6 +592,23 @@ export default function register(api: any) {
           deleteTask(taskId);
           logTaskEvent({ taskId, action: "cancelled", actor: agentId, timestamp: new Date().toISOString() });
           return { success: true, message: `Task deleted: ${taskId}` };
+        }
+
+        if (action === "pause") {
+          const task = updateTaskStatus(taskId, "BLOCKED");
+          logTaskEvent({ taskId: task.id, action: "paused", actor: agentId, timestamp: new Date().toISOString() });
+          return { success: true, message: `Task paused: ${task.id}`, task };
+        }
+
+        if (action === "edit") {
+          const { updateTask } = getTasksModule();
+          const updates: any = {};
+          if (params.title !== undefined) updates.title = params.title;
+          if (params.prompt !== undefined) updates.prompt = params.prompt;
+          if (params.assignee !== undefined) updates.assignedTo = params.assignee;
+          const task = updateTask(taskId, updates);
+          logTaskEvent({ taskId: task.id, action: "edited", actor: agentId, timestamp: new Date().toISOString() });
+          return { success: true, message: `Task edited: ${task.id}`, task };
         }
 
         throw new Error(`Unknown action: ${action}`);
@@ -1125,8 +1145,8 @@ export default function register(api: any) {
       properties: {
         action: {
           type: "string",
-          description: "Action to perform: list, add, claim, complete, status, delete",
-          enum: ["list", "add", "claim", "complete", "status", "delete"]
+          description: "Action to perform: list, add, claim, complete, status, delete, pause, edit",
+          enum: ["list", "add", "claim", "complete", "status", "delete", "pause", "edit"]
         },
         taskId: {
           type: "string",
@@ -1150,7 +1170,8 @@ export default function register(api: any) {
         },
         status: {
           type: "string",
-          description: "New status for the task (required for action=status) (e.g. IN_PROGRESS, PAUSED, BLOCKED)"
+          description: "New status for the task (required for action=status). Allowed values: OPEN, IN_PROGRESS, COMPLETED, CANCELLED, BLOCKED",
+          enum: ["OPEN", "IN_PROGRESS", "COMPLETED", "CANCELLED", "BLOCKED"]
         }
       }
     },
@@ -1195,10 +1216,12 @@ export default function register(api: any) {
         if (action === "status") {
           if (!status) throw new Error("Missing status for action=status");
           const task = updateTaskStatus(taskId, status.toUpperCase());
-          
-          let eventAction = "paused";
+
+          let eventAction = "status_changed";
           if (status.toUpperCase() === "IN_PROGRESS") eventAction = "resumed";
           if (status.toUpperCase() === "CANCELLED") eventAction = "cancelled";
+          if (status.toUpperCase() === "BLOCKED") eventAction = "paused";
+          if (status.toUpperCase() === "COMPLETED") eventAction = "completed";
 
           logTaskEvent({ taskId: task.id, action: eventAction, actor: agentId, timestamp: new Date().toISOString() });
           return { success: true, message: `Task status updated: ${task.id} -> ${task.status}`, task };
@@ -1208,6 +1231,23 @@ export default function register(api: any) {
           deleteTask(taskId);
           logTaskEvent({ taskId, action: "cancelled", actor: agentId, timestamp: new Date().toISOString() });
           return { success: true, message: `Task deleted: ${taskId}` };
+        }
+
+        if (action === "pause") {
+          const task = updateTaskStatus(taskId, "BLOCKED");
+          logTaskEvent({ taskId: task.id, action: "paused", actor: agentId, timestamp: new Date().toISOString() });
+          return { success: true, message: `Task paused: ${task.id}`, task };
+        }
+
+        if (action === "edit") {
+          const { updateTask } = getTasksModule();
+          const updates: any = {};
+          if (params.title !== undefined) updates.title = params.title;
+          if (params.prompt !== undefined) updates.prompt = params.prompt;
+          if (params.assignee !== undefined) updates.assignedTo = params.assignee;
+          const task = updateTask(taskId, updates);
+          logTaskEvent({ taskId: task.id, action: "edited", actor: agentId, timestamp: new Date().toISOString() });
+          return { success: true, message: `Task edited: ${task.id}`, task };
         }
 
         throw new Error(`Unknown action: ${action}`);
