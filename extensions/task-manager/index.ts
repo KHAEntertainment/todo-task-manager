@@ -1,4 +1,4 @@
-import { createRequire } from "module";
+import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
 const TASKS_MODULE_PATH = "/home/openclaw/.openclaw/workspace/skills/task-manager/tasks.js";
@@ -553,7 +553,8 @@ export default function register(api: any) {
 
       try {
         if (action === "list") {
-          return readTasks();
+          const result = readTasks();
+          return { success: true, message: "Tasks retrieved", tasks: result };
         }
         
         if (action === "add") {
@@ -652,6 +653,6 @@ function formatMinimalTaskList({ showAll = false }: { showAll?: boolean } = {}):
   ).join("\n");
 
   return {
-    text: `${header}\nTasks file: ${TASKS_FILE}\n\n| ID | Status | Title | Assignee | Dependencies |\n|:---|:-------|:------|:---------|:-------------|${rows}`,
+    text: `${header}\nTasks file: ${TASKS_FILE}\n\n| ID | Status | Title | Assignee | Dependencies |\n|:---|:-------|:------|:---------|:-------------|\n${rows}`,
   };
 }

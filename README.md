@@ -95,10 +95,12 @@ Tasks can have `dependsOn: ["task_001", "task_002"]` arrays. Tasks with uncomple
    // Available in LLM context
    {
      "name": "task_manager",
-     "action": "list" | "add" | "claim" | "complete" | "status",
+     "action": "list" | "add" | "claim" | "complete" | "status" | "pause" | "edit" | "delete",
      "taskId": "task_001",
      "title": "Task title",
-     "status": "IN_PROGRESS"
+     "status": "IN_PROGRESS",
+     // For edit action: title, prompt, assignee (all optional)
+     // For pause/delete: only taskId required
    }
    ```
 
@@ -227,7 +229,7 @@ todo-task-manager/
 
 1. **Create Tasks:** Use `/task add "Feature" --prompt "Full prompt"`
 2. **View Tasks:** Use `/tasks` (minimal table) or `/tasks detailed` (full view)
-3. **Complete Tasks:** Use `/task complete task_001` or click complete button
+3. **Complete Tasks:** Use `/task complete task_001` via chat command or supported UI (note: inline keyboard buttons not available due to SDK limitation)
 4. **Manage Tasks:** Edit, unassign, reassign as needed via commands
 
 ### For Agents (Barry, Albert)

@@ -16,6 +16,9 @@ The `task_manager` tool is available in your LLM context whenever you are runnin
 | Claim task | `task_manager(action: "claim", taskId: "task_001")` | Mark task as IN_PROGRESS |
 | Complete task | `task_manager(action: "complete", taskId: "task_001")` | Mark task as COMPLETED |
 | Update status | `task_manager(action: "status", taskId: "task_001", status: "PAUSED")` | Pause, resume, or cancel task |
+| Pause task | `task_manager(action: "pause", taskId: "...")` | Mark task as BLOCKED |
+| Edit task | `task_manager(action: "edit", taskId: "...", title?: "...", prompt?: "...")` | Update task title/prompt |
+| Delete task | `task_manager(action: "delete", taskId: "...")` | Remove task from system |
 
 ## When to Use
 
