@@ -31,7 +31,24 @@
 
 ### Overview
 
-Replace text-based slash commands with interactive Telegram inline keyboards for faster, more intuitive task management.
+Replace text-based slash commands with **TRUE interactive Telegram menus** for faster, more intuitive task management.
+
+**Key Requirement (Updated 2026-03-20):**
+User wants **clickable tasks** like the `/models` picker UI — not static TUI display with emoji hints.
+
+When a user clicks on a task:
+- Show interactive menu with available actions (claim, complete, edit, pause, delete)
+- Actions should be selectable via tap/click (not just copy-pasting commands)
+- Similar UX to `/models` command where user selects from interactive picker
+
+**NOT:**
+- ❌ Static TUI-style display with emoji hints only
+- ❌ Text-based command shortcuts that must be manually typed
+
+**YES:**
+- ✅ Clickable task buttons that open action menus
+- ✅ Interactive selection (like `/models` picker)
+- ✅ Callback-driven actions (tap → action executes)
 
 ### Implementation Strategy
 
