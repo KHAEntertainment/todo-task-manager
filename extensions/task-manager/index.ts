@@ -469,6 +469,12 @@ async function handleTaskCommand(ctx: PluginCommandContext): Promise<PluginComma
     if (action === "complete") {
       const { completeTask } = getTasksModule();
       const task = completeTask(id, agentId);
+      logTaskEvent({
+        taskId: task.id,
+        action: "completed",
+        actor: agentId || "unknown",
+        timestamp: new Date().toISOString(),
+      });
       const msg = `✅ Completed ${task.id}: "${task.title}"`;
       return {
         text: isButtonTriggered ? msg : `Updated ${task.id} -> ${STATUS_LABELS[task.status]}\n${formatTask(task)}`,
@@ -478,19 +484,32 @@ async function handleTaskCommand(ctx: PluginCommandContext): Promise<PluginComma
     if (action === "claim") {
       const { claimTask } = getTasksModule();
       const task = claimTask(id, agentId);
+      logTaskEvent({
+        taskId: task.id,
+        action: "claimed",
+        actor: agentId || "unknown",
+        target: task.assignedTo,
+        timestamp: new Date().toISOString(),
+      });
       const msg = `✅ Claimed ${task.id}: "${task.title}"\nClaimed by: ${task.claimedBy}`;
       return { text: isButtonTriggered ? msg : `Claimed ${task.id} -> ${STATUS_LABELS[task.status]}\nClaimed by: ${task.claimedBy} at ${new Date(task.claimedAt!).toLocaleString("en-US", { timeZone: "America/Los_Angeles" })}` };
     }
 
     if (action === "pause" || action === "status") {
       const { updateTaskStatus } = getTasksModule();
-      // Handle "/task status {id} {status}" syntax from buttons
-      let newStatus = "BLOCKED";
+      const task = findTaskOrThrow(id);
+      let newStatus = "PAUSED";
       if (action === "status" && tokens.length > 0) {
         newStatus = tokens[0].toUpperCase();
       }
-      const task = updateTaskStatus(id, newStatus);
-      const msg = `⏸ ${task.id}: "${task.title}" is now ${STATUS_LABELS[task.status]}`;
+      const updatedTask = updateTaskStatus(id, newStatus);
+      logTaskEvent({
+        taskId: updatedTask.id,
+        action: newStatus === "PAUSED" ? "paused" : newStatus === "IN_PROGRESS" ? "resumed" : "cancelled",
+        actor: agentId || "unknown",
+        timestamp: new Date().toISOString(),
+      });
+      const msg = `⏸ ${updatedTask.id}: "${updatedTask.title}" is now ${STATUS_LABELS[updatedTask.status]}`;
       return { text: isButtonTriggered ? msg : `Updated ${task.id} -> ${STATUS_LABELS[task.status]}` };
     }
 
@@ -688,6 +707,62 @@ function registerSessionHooks(api: {
       prependContext: `<task-discovery>\n${discovery}\n</task-discovery>`,
     };
   });
+}
+
+/**
+ * Log a task-related event (claim, complete, assign, etc.)
+ */
+function logTaskEvent(event: {
+  taskId: string;
+  action: "claimed" | "completed" | "assigned" | "unassigned" | "paused" | "resumed" | "cancelled";
+  actor: string;
+  target?: string;
+  timestamp: string;
+}): void {
+  try {
+    let events = [];
+    try {
+      const data = fs.readFileSync(EVENT_LOG_FILE, "utf8");
+      events = JSON.parse(data);
+    } catch (err) {
+      events = [];
+    }
+
+    events.unshift(event);
+    if (events.length > 100) {
+      events = events.slice(0, 100);
+    }
+
+    fs.writeFileSync(EVENT_LOG_FILE, JSON.stringify(events, null, 2), "utf8");
+    api.logger.info(`Task event logged: ${event.action} ${event.taskId} by ${event.actor}`);
+  } catch (err) {
+    api.logger.error(`Failed to log task event: ${err}`);
+  }
+}
+
+/**
+ * Format recent task events for display
+ */
+function formatEventLog(count = 5): string {
+  try {
+    const data = fs.readFileSync(EVENT_LOG_FILE, "utf8");
+    const events = JSON.parse(data);
+    const recent = events.slice(0, count);
+
+    if (recent.length === 0) {
+      return "No recent task events.";
+    }
+
+    const lines = recent.map((evt: any) => {
+      const time = new Date(evt.timestamp).toLocaleTimeString("en-US", { timeZone: "America/Los_Angeles", hour: "2-digit", minute: "2-digit" });
+      const target = evt.target ? ` → @${evt.target}` : "";
+      return `  [${time}] ${evt.actor} ${evt.action} ${evt.taskId}${target}`;
+    });
+
+    return `📜 Recent events:\n${lines.join("\\n")}`;
+  } catch (err) {
+    return "Unable to load event log.";
+  }
 }
 
 export {
