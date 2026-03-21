@@ -338,7 +338,7 @@ function formatTaskList({ showAll = false, priorityFilter, showBlocked, page = 0
   }
 
   return {
-    text: `${header}\nTasks file: ${TASKS_FILE}\n\n${body}`,
+    text: `${header}\nTasks file: ${TASKS_FILE}\n\n${body}\n\n${events}`,
     channelData: {
       telegram: {
         buttons: buttonRows.length > 0 ? buttonRows : undefined,
