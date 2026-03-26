@@ -6,9 +6,32 @@
 const fs = require('fs');
 const path = require('path');
 
-const TASKS_FILE = '/home/openclaw/.openclaw/workspace/skills/task-manager/tasks.json';
+const TASKS_FILE = process.env.TASKS_FILE || path.join(
+  process.env.HOME || process.env.USERPROFILE || process.cwd(),
+  '.openclaw/workspace/skills/task-manager/tasks.json'
+);
 
 function readStore() {
+  // Check if file exists, create initial store if missing
+  if (!fs.existsSync(TASKS_FILE)) {
+    const initialStore = {
+      version: '1.0',
+      lastTaskSequence: 0,
+      taskTypes: ['EPIC', 'TASK', 'STORY'],
+      statuses: ['OPEN', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED', 'BLOCKED'],
+      tasks: []
+    };
+
+    // Ensure directory exists
+    const dir = path.dirname(TASKS_FILE);
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+
+    fs.writeFileSync(TASKS_FILE, JSON.stringify(initialStore, null, 2), 'utf8');
+    return initialStore;
+  }
+
   const raw = fs.readFileSync(TASKS_FILE, 'utf8');
   return JSON.parse(raw);
 }

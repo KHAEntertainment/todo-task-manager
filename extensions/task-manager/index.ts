@@ -336,7 +336,13 @@ function formatTaskList({ showAll = false, detailed = false, priorityFilter, sho
 
   // Build web_app buttons — opens the task manager web app
   // Actions (complete, claim, edit, etc.) are handled in the web app itself
-  const webAppUrl = "http://localhost:18799";
+  const webAppUrl = process.env.TASK_MANAGER_WEBAPP_URL;
+  if (!webAppUrl) {
+    throw new Error("TASK_MANAGER_WEBAPP_URL environment variable is required but not set");
+  }
+  if (!webAppUrl.startsWith("https://") && !webAppUrl.startsWith("http://localhost")) {
+    throw new Error("TASK_MANAGER_WEBAPP_URL must be an HTTPS public URL or http://localhost for development");
+  }
 
   const buttonRows: TelegramButton[][] = [
     [
@@ -732,6 +738,54 @@ export {
 };
 
 export default function register(api: any) {
+  // Register Telegram callback_query handler for pagination buttons
+  if (api.telegram && api.telegram.bot) {
+    api.telegram.bot.on('callback_query', async (callbackQuery: any) => {
+      try {
+        const { data, message, from } = callbackQuery;
+        if (!data || !message) return;
+
+        // Parse callback_data format: "/tasks page N"
+        const match = data.match(/^\/tasks\s+page\s+(\d+)$/);
+        if (!match) return;
+
+        const page = parseInt(match[1], 10);
+        if (isNaN(page)) return;
+
+        // Re-run handleTasksCommand with parsed page
+        const ctx: PluginCommandContext = {
+          args: `page ${page}`,
+          agentId: from.username || String(from.id),
+        };
+
+        const result = await handleTasksCommand(ctx);
+
+        // Update the message with new page content
+        await api.telegram.bot.editMessageText(result.text, {
+          chat_id: message.chat.id,
+          message_id: message.message_id,
+          parse_mode: 'Markdown',
+          reply_markup: result.channelData?.telegram?.buttons
+            ? { inline_keyboard: result.channelData.telegram.buttons }
+            : undefined,
+        });
+
+        // Answer callback query to clear loading state
+        await api.telegram.bot.answerCallbackQuery(callbackQuery.id);
+      } catch (err) {
+        console.error('[task-manager] callback_query handler error:', err);
+        // Still answer the callback to prevent loading spinner
+        try {
+          await api.telegram.bot.answerCallbackQuery(callbackQuery.id, {
+            text: 'Error loading page',
+            show_alert: false,
+          });
+        } catch (answerErr) {
+          console.error('[task-manager] answerCallbackQuery error:', answerErr);
+        }
+      }
+    });
+  }
 
   api.registerTool({
     name: "task_manager",

@@ -82,7 +82,7 @@ router.put('/:id', (req, res) => {
   try {
     const existing = tasks.getTask(req.params.id);
     if (!existing) return res.status(404).json({ error: 'Task not found' });
-    const allowed = ['title', 'prompt', 'type', 'assignedTo', 'dependsOn', 'priority', 'status', 'claimedBy', 'claimedAt', 'blockedBy', 'blockedReason'];
+    const allowed = ['title', 'prompt', 'type', 'assignedTo', 'dependsOn', 'priority', 'claimedBy', 'claimedAt', 'blockedBy', 'blockedReason'];
     const updates = {};
     for (const key of allowed) {
       if (req.body[key] !== undefined) updates[key] = req.body[key];
