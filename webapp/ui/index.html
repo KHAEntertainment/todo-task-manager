@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Task Manager</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <div class="container">
+    <header class="header">
+      <h1>📋 Task Manager</h1>
+      <div class="header-actions">
+        <button id="btn-add-task" class="btn btn-primary">➕ New Task</button>
+      </div>
+    </header>
+
+    <!-- Filter Bar -->
+    <div class="filter-bar">
+      <label>Status:</label>
+      <select id="filter-status">
+        <option value="">All</option>
+        <option value="OPEN">Open</option>
+        <option value="IN_PROGRESS">In Progress</option>
+        <option value="BLOCKED">Blocked</option>
+        <option value="COMPLETED">Completed</option>
+      </select>
+      <label>Priority:</label>
+      <select id="filter-priority">
+        <option value="">All</option>
+        <option value="HIGH">High</option>
+        <option value="MEDIUM">Medium</option>
+        <option value="LOW">Low</option>
+      </select>
+      <label>Assignee:</label>
+      <input type="text" id="filter-assignee" placeholder="e.g. coder">
+      <button id="btn-apply-filters" class="btn btn-small">Apply</button>
+      <button id="btn-clear-filters" class="btn btn-small btn-ghost">Clear</button>
+    </div>
+
+    <!-- Task List -->
+    <div id="task-list" class="task-list">
+      <div class="loading">Loading tasks...</div>
+    </div>
+
+    <!-- Task Count -->
+    <div id="task-count" class="task-count"></div>
+  </div>
+
+  <!-- Add/Edit Task Modal -->
+  <div id="task-modal" class="modal hidden">
+    <div class="modal-backdrop"></div>
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2 id="modal-title">New Task</h2>
+        <button class="btn-close" id="btn-close-modal">✕</button>
+      </div>
+      <form id="task-form">
+        <input type="hidden" id="task-id">
+        <div class="form-group">
+          <label for="task-title">Title *</label>
+          <input type="text" id="task-title" required placeholder="What needs to be done?">
+        </div>
+        <div class="form-group">
+          <label for="task-prompt">Prompt / Notes</label>
+          <textarea id="task-prompt" rows="3" placeholder="Full prompt or additional notes..."></textarea>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label for="task-type">Type</label>
+            <select id="task-type">
+              <option value="TASK">Task</option>
+              <option value="EPIC">Epic</option>
+              <option value="STORY">Story</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="task-priority">Priority</label>
+            <select id="task-priority">
+              <option value="HIGH">High</option>
+              <option value="MEDIUM" selected>Medium</option>
+              <option value="LOW">Low</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-group">
+          <label for="task-assignee">Assignee</label>
+          <input type="text" id="task-assignee" placeholder="e.g. coder, planner">
+        </div>
+        <div class="form-group">
+          <label for="task-depends">Depends On (comma-separated IDs)</label>
+          <input type="text" id="task-depends" placeholder="e.g. task_001, task_002">
+        </div>
+        <div class="form-actions">
+          <button type="button" class="btn btn-ghost" id="btn-cancel-modal">Cancel</button>
+          <button type="submit" class="btn btn-primary" id="btn-save-task">Save Task</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <script src="/js/app.js"></script>
+</body>
+</html>

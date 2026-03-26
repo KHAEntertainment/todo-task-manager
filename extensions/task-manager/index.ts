@@ -45,9 +45,22 @@ type PluginCommandContext = {
   sessionKey?: string;
 };
 
+type TelegramButton = {
+  text: string;
+  callback_data?: string;
+  web_app?: { url: string };
+};
+
+type TelegramButtons = TelegramButton[][];
+
 type PluginCommandPayload = {
   text: string;
   isError?: boolean;
+  channelData?: {
+    telegram?: {
+      buttons?: TelegramButtons;
+    };
+  };
 };
 
 function getTasksModule() {
@@ -279,30 +292,80 @@ function formatTaskTableRow(task: any) {
   return `| ${task.id} | ${task.status} | ${task.title} | ${assignee} | ${deps} |`;
 }
 
-function formatTaskList({ showAll = false, detailed = false }: { showAll?: boolean, detailed?: boolean } = {}): PluginCommandPayload {
+function formatTaskList({ showAll = false, detailed = false, priorityFilter, showBlocked, page = 0 }: { showAll?: boolean; detailed?: boolean; priorityFilter?: string | null; showBlocked?: boolean; page?: number } = {}): PluginCommandPayload {
   const { TASKS_FILE } = getTasksModule();
-  const tasks = sortTasks(filterTasks(showAll));
-  
-  const header = showAll ? "# 📋 Todo Task Manager - All Tasks" : "# 📋 Todo Task Manager - Active Tasks";
+  let tasks = filterTasks(showAll, priorityFilter);
+
+  // Filter for blocked tasks if requested
+  if (showBlocked) {
+    tasks = tasks.filter((task: { status: string }) => task.status === "BLOCKED");
+  }
+
+  tasks = sortTasks(tasks);
+
+  let header = showAll
+    ? "📋 Todo Task Manager - All Tasks"
+    : "📋 Todo Task Manager - Active Tasks";
+  if (showBlocked) {
+    header = "📋 Todo Task Manager - Blocked Tasks";
+  }
+  if (priorityFilter) {
+    header += ` [${formatPriority(priorityFilter)}]`;
+  }
 
   if (tasks.length === 0) {
     return {
-      text: `${header}\nTasks file: ${TASKS_FILE}\n\nNo tasks found.\nUse /task add "Title" --prompt "Full prompt" to create one.`
+      text: showAll
+        ? `${header}\nTasks file: ${TASKS_FILE}\n\nNo tasks found.\nUse /task add "Title" --prompt "Full prompt" to create one.`
+        : `${header}\nTasks file: ${TASKS_FILE}\n\nNo active tasks.\nUse /task add "Title" --prompt "Full prompt" to create one.`,
     };
   }
 
-  let text = `${header}\nTasks file: ${TASKS_FILE}\n\n`;
+  // Pagination: show max 5 tasks per page
+  const TASKS_PER_PAGE = 5;
+  const totalPages = Math.ceil(tasks.length / TASKS_PER_PAGE);
+  const startIdx = page * TASKS_PER_PAGE;
+  const pageTasks = tasks.slice(startIdx, startIdx + TASKS_PER_PAGE);
 
+  let body = "";
   if (detailed) {
-    text += tasks.map(formatTaskDetailed).join("\n\n---\n\n");
+    body = pageTasks.map(formatTaskDetailed).join("\n\n");
   } else {
-    text += "Use /tasks:commands for available functions.\n\n---\n\n";
-    text += "| ID | Status | Title | Assignee | Dependencies |\n";
-    text += "|:---|:-------|:------|:---------|:-------------|\n";
-    text += tasks.map(formatTaskTableRow).join("\n");
+    body = pageTasks.map(formatTaskTableRow).join("\n");
   }
 
-  return { text };
+  // Build web_app buttons — opens the task manager web app
+  // Actions (complete, claim, edit, etc.) are handled in the web app itself
+  const webAppUrl = "http://localhost:18799";
+
+  const buttonRows: TelegramButton[][] = [
+    [
+      { text: "🔗 Open Task Manager", web_app: { url: webAppUrl } },
+      { text: "➕ New Task", web_app: { url: webAppUrl } },
+    ],
+  ];
+
+  // Pagination nav via callback_data (no web_app needed for nav)
+  if (totalPages > 1) {
+    const navRow: TelegramButton[] = [];
+    if (page > 0) {
+      navRow.push({ text: "⬅️ Prev", callback_data: `/tasks page ${page - 1}` });
+    }
+    navRow.push({ text: `📄 ${page + 1}/${totalPages}`, callback_data: `/tasks page ${page}` });
+    if (page < totalPages - 1) {
+      navRow.push({ text: "Next ➡️", callback_data: `/tasks page ${page + 1}` });
+    }
+    buttonRows.push(navRow);
+  }
+
+  return {
+    text: `${header}\nTasks file: ${TASKS_FILE}\n\n| ID | Status | Title | Assignee | Dependencies |\n|:---|:-------|:------|:---------|:-------------|\n${body}`,
+    channelData: {
+      telegram: {
+        buttons: buttonRows,
+      },
+    },
+  };
 }
 
 function findTaskOrThrow(id: string) {
@@ -352,23 +415,31 @@ function buildUsage() {
 async function handleTasksCommand(ctx: PluginCommandContext): Promise<PluginCommandPayload> {
   const args = (ctx.args || "").trim();
   const tokens = tokenizeArgs(args);
-  
+  const { options } = parseOptions(tokens);
+  const showAll = tokens.some(t => t.toLowerCase() === "all");
+  const showBlocked = tokens.some(t => t.toLowerCase() === "blocked");
+  const priorityFilter = options.priority ? String(options.priority).toUpperCase() : null;
+
+  // Parse page number from "page N" token
+  let page = 0;
+  const pageIndex = tokens.findIndex(t => t.toLowerCase() === "page");
+  if (pageIndex !== -1 && tokens[pageIndex + 1]) {
+    const pageNum = parseInt(tokens[pageIndex + 1], 10);
+    if (!isNaN(pageNum) && pageNum >= 0) {
+      page = pageNum;
+    }
+  }
+
   // Commands reference
   if (tokens.includes("commands") || tokens.includes(":commands") || args.includes("commands") || args.includes(":commands")) {
     return { text: COMMANDS_REF };
   }
 
   // Parse flags
-  const showAll = tokens.includes("all");
   const detailed = tokens.includes("detailed") || tokens.includes("--detailed") || tokens.includes("full");
 
-  // By default, use minimal table view
-  if (!showAll && !detailed) {
-    return formatMinimalTaskList({ showAll });
-  }
-
-  // Detailed view or 'all' shows full details
-  return formatTaskList({ showAll, detailed });
+  // Use formatTaskList with pagination and webapp buttons
+  return formatTaskList({ showAll, detailed, priorityFilter, showBlocked, page });
 }
 
 /**
