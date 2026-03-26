@@ -666,9 +666,21 @@ export default function register(api: any) {
     name: "task_manager",
     description: "Manage Todo tasks. Agents MUST use this tool to interact with their assigned tasks (claim, complete, status, etc).",
     parameters: Type.Object({
-      action: Type.String({
-        description: "Action to perform: list, add, claim, complete, status, delete, pause, edit",
-      }),
+      action: Type.Union(
+        [
+          Type.Literal("list"),
+          Type.Literal("add"),
+          Type.Literal("claim"),
+          Type.Literal("complete"),
+          Type.Literal("status"),
+          Type.Literal("delete"),
+          Type.Literal("pause"),
+          Type.Literal("edit"),
+        ],
+        {
+          description: "Action to perform: list, add, claim, complete, status, delete, pause, edit",
+        },
+      ),
       taskId: Type.Optional(Type.String({
         description: "Task ID (required for claim, complete, status, delete)"
       })),
@@ -684,9 +696,19 @@ export default function register(api: any) {
       priority: Type.Optional(Type.String({
         description: "Task priority (HIGH, MEDIUM, LOW) (optional for add)"
       })),
-      status: Type.Optional(Type.String({
-        description: "New status for the task (required for action=status). Allowed values: OPEN, IN_PROGRESS, COMPLETED, CANCELLED, BLOCKED",
-      })),
+      status: Type.Optional(Type.Union(
+        [
+          Type.Literal("OPEN"),
+          Type.Literal("IN_PROGRESS"),
+          Type.Literal("COMPLETED"),
+          Type.Literal("CANCELLED"),
+          Type.Literal("BLOCKED"),
+          Type.Literal("PAUSED"),
+        ],
+        {
+          description: "New status for the task (required for action=status). Allowed values: OPEN, IN_PROGRESS, COMPLETED, CANCELLED, BLOCKED, PAUSED",
+        },
+      )),
     }),
     execute: async (params, ctx) => {
       const { action, taskId, title, prompt, assignee, priority, status } = params;
