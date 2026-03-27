@@ -292,6 +292,67 @@ function formatTaskTableRow(task: any) {
   return `| ${task.id} | ${task.status} | ${task.title} | ${assignee} | ${deps} |`;
 }
 
+function formatTask(task: {
+  id: string;
+  type: string;
+  status: string;
+  title: string;
+  priority?: string;
+  assignedTo?: string;
+  claimedBy?: string;
+  claimedAt?: string;
+  completedBy?: string;
+  completedAt?: string;
+  dependsOn?: string[];
+  blockedBy?: string[];
+  blockedReason?: string;
+  prompt?: string;
+}) {
+  const lines = [
+    formatPriority(task.priority),
+    `${TYPE_LABELS[task.type] || task.type} ${task.id}`,
+    `${STATUS_LABELS[task.status] || task.status} ${task.title}`,
+  ];
+
+  if (task.assignedTo) {
+    lines.push(`Assignee: ${task.assignedTo}`);
+  }
+
+  if (task.claimedBy) {
+    const claimTime = task.claimedAt
+      ? new Date(task.claimedAt).toLocaleString("en-US", { timeZone: "America/Los_Angeles" })
+      : "";
+    lines.push(`Claimed by: ${task.claimedBy}${claimTime ? ` at ${claimTime}` : ""}`);
+  }
+
+  if (task.completedBy) {
+    const completeTime = task.completedAt
+      ? new Date(task.completedAt).toLocaleString("en-US", { timeZone: "America/Los_Angeles" })
+      : "";
+    lines.push(`Completed by: ${task.completedBy}${completeTime ? ` at ${completeTime}` : ""}`);
+  }
+
+  if (Array.isArray(task.dependsOn) && task.dependsOn.length > 0) {
+    lines.push(`Depends on: ${task.dependsOn.join(", ")}`);
+  }
+
+  if (task.status === "BLOCKED" && Array.isArray(task.blockedBy) && task.blockedBy.length > 0) {
+    lines.push(`Blocked by: ${task.blockedBy.join(", ")}`);
+    if (task.blockedReason) {
+      lines.push(`Reason: ${task.blockedReason}`);
+    }
+  }
+
+  if (task.prompt) {
+    lines.push(`Prompt: ${task.prompt}`);
+  }
+
+  if (ACTIVE_STATUSES.has(task.status)) {
+    lines.push(`  Actions: /task claim ${task.id} | /task complete ${task.id} | /task pause ${task.id}`);
+  }
+  return lines.join("\n");
+}
+
 function formatTaskList({ showAll = false, detailed = false, priorityFilter, showBlocked, page = 0 }: { showAll?: boolean; detailed?: boolean; priorityFilter?: string | null; showBlocked?: boolean; page?: number } = {}): PluginCommandPayload {
   const { TASKS_FILE } = getTasksModule();
   let tasks = filterTasks(showAll, priorityFilter);
@@ -327,31 +388,47 @@ function formatTaskList({ showAll = false, detailed = false, priorityFilter, sho
   const startIdx = page * TASKS_PER_PAGE;
   const pageTasks = tasks.slice(startIdx, startIdx + TASKS_PER_PAGE);
 
-  let body = "";
-  if (detailed) {
-    body = pageTasks.map(formatTaskDetailed).join("\n\n");
-  } else {
-    body = pageTasks.map(formatTaskTableRow).join("\n");
-  }
+  // Use detailed format for task list output (includes all task info)
+  const body = pageTasks.map(formatTask).join("\n\n");
 
-  // Build web_app buttons — opens the task manager web app
-  // Actions (complete, claim, edit, etc.) are handled in the web app itself
+  // Build per-task inline buttons + optional Dashboard web_app button
+  const buttonRows: TelegramButton[][] = [];
+
+  // Add Dashboard web_app button row at the top if configured
   const webAppUrl = process.env.TASK_MANAGER_WEBAPP_URL;
-  if (!webAppUrl) {
-    throw new Error("TASK_MANAGER_WEBAPP_URL environment variable is required but not set");
-  }
-  if (!webAppUrl.startsWith("https://") && !webAppUrl.startsWith("http://localhost")) {
-    throw new Error("TASK_MANAGER_WEBAPP_URL must be an HTTPS public URL or http://localhost for development");
+  if (webAppUrl && (webAppUrl.startsWith("https://") || webAppUrl.startsWith("http://localhost"))) {
+    buttonRows.push([
+      { text: "🔗 Dashboard", web_app: { url: webAppUrl } },
+    ]);
   }
 
-  const buttonRows: TelegramButton[][] = [
-    [
-      { text: "🔗 Open Task Manager", web_app: { url: webAppUrl } },
-      { text: "➕ New Task", web_app: { url: webAppUrl } },
-    ],
-  ];
+  // Build per-task inline buttons for each visible task
+  pageTasks.forEach((task: { id: string; status: string; claimedBy?: string }) => {
+    const taskRow: TelegramButton[] = [];
 
-  // Pagination nav via callback_data (no web_app needed for nav)
+    // Complete button
+    taskRow.push({ text: `✅ Complete ${task.id}`, callback_data: `/task complete ${task.id}` });
+
+    // Claim/Resume button
+    if (task.status === "OPEN" || task.status === "BLOCKED") {
+      taskRow.push({ text: `🙋 Claim ${task.id}`, callback_data: `/task claim ${task.id}` });
+    }
+    if (task.status === "BLOCKED") {
+      taskRow.push({ text: `▶️ Resume ${task.id}`, callback_data: `/task status ${task.id} IN_PROGRESS` });
+    }
+
+    // Pause button
+    if (task.status !== "COMPLETED" && task.status !== "CANCELLED") {
+      taskRow.push({ text: `⏸ Pause ${task.id}`, callback_data: `/task pause ${task.id}` });
+    }
+
+    // View details button
+    taskRow.push({ text: `👁 View ${task.id}`, callback_data: `/task view ${task.id}` });
+
+    buttonRows.push(taskRow);
+  });
+
+  // Add Next/Previous pagination buttons if needed
   if (totalPages > 1) {
     const navRow: TelegramButton[] = [];
     if (page > 0) {
@@ -365,10 +442,10 @@ function formatTaskList({ showAll = false, detailed = false, priorityFilter, sho
   }
 
   return {
-    text: `${header}\nTasks file: ${TASKS_FILE}\n\n| ID | Status | Title | Assignee | Dependencies |\n|:---|:-------|:------|:---------|:-------------|\n${body}`,
+    text: `${header}\nTasks file: ${TASKS_FILE}\n\n${body}`,
     channelData: {
       telegram: {
-        buttons: buttonRows,
+        buttons: buttonRows.length > 0 ? buttonRows : undefined,
       },
     },
   };
@@ -458,6 +535,10 @@ async function handleTaskCommand(ctx: PluginCommandContext): Promise<PluginComma
   const args = (ctx.args || "").trim();
   // Use agentId from context (preferred) or fall back to lastSessionInfo
   const agentId = ctx.agentId || lastSessionInfo.agentId || "";
+
+  // Detect if this was triggered by a button click (Telegram echoes callback_data as "/task ...")
+  const isButtonTriggered = args.startsWith("/task ");
+
   if (!args) {
     return { text: buildUsage() };
   }
@@ -526,28 +607,49 @@ async function handleTaskCommand(ctx: PluginCommandContext): Promise<PluginComma
     if (action === "complete") {
       const { completeTask } = getTasksModule();
       const task = completeTask(id, agentId);
+      const msg = `✅ Completed ${task.id}: "${task.title}"`;
       return {
-        text: `Updated ${task.id} -> ${STATUS_LABELS[task.status]}\n${formatTaskDetailed(task)}`,
+        text: isButtonTriggered ? msg : `Updated ${task.id} -> ${STATUS_LABELS[task.status]}\n${formatTask(task)}`,
       };
     }
 
     if (action === "claim") {
       const { claimTask } = getTasksModule();
       const task = claimTask(id, agentId);
-      return { text: `Claimed ${task.id} -> ${STATUS_LABELS[task.status]}\nClaimed by: ${task.claimedBy} at ${new Date(task.claimedAt!).toLocaleString("en-US", { timeZone: "America/Los_Angeles" })}` };
+      const msg = `✅ Claimed ${task.id}: "${task.title}"\nClaimed by: ${task.claimedBy}`;
+      return { text: isButtonTriggered ? msg : `Claimed ${task.id} -> ${STATUS_LABELS[task.status]}\nClaimed by: ${task.claimedBy} at ${new Date(task.claimedAt!).toLocaleString("en-US", { timeZone: "America/Los_Angeles" })}` };
     }
 
     if (action === "pause") {
       const { updateTaskStatus } = getTasksModule();
       const task = updateTaskStatus(id, "BLOCKED");
-      return { text: `Updated ${task.id} -> ${STATUS_LABELS[task.status]}` };
+      const msg = `⏸ Paused ${task.id}: "${task.title}"`;
+      return { text: isButtonTriggered ? msg : `Updated ${task.id} -> ${STATUS_LABELS[task.status]}` };
+    }
+
+    if (action === "status") {
+      const { updateTaskStatus } = getTasksModule();
+      const task = findTaskOrThrow(id);
+      let newStatus = "PAUSED";
+      if (tokens.length > 0) {
+        newStatus = tokens[0].toUpperCase();
+      }
+      const updatedTask = updateTaskStatus(id, newStatus);
+      const msg = `▶️ ${updatedTask.id}: "${updatedTask.title}" is now ${STATUS_LABELS[updatedTask.status]}`;
+      return { text: isButtonTriggered ? msg : `Updated ${task.id} -> ${STATUS_LABELS[task.status]}` };
+    }
+
+    if (action === "view") {
+      const task = findTaskOrThrow(id);
+      return { text: formatTask(task) };
     }
 
     if (action === "delete") {
       const { deleteTask } = getTasksModule();
       findTaskOrThrow(id);
       deleteTask(id);
-      return { text: `Deleted ${id}` };
+      const msg = `🗑 Deleted ${id}`;
+      return { text: isButtonTriggered ? msg : `Deleted ${id}` };
     }
 
     if (action === "edit") {
@@ -728,6 +830,7 @@ function registerSessionHooks(api: {
 
 export {
   buildUsage,
+  formatTask,
   formatTaskDetailed,
   formatTaskList,
   getTasksModule,
@@ -738,55 +841,6 @@ export {
 };
 
 export default function register(api: any) {
-  // Register Telegram callback_query handler for pagination buttons
-  if (api.telegram && api.telegram.bot) {
-    api.telegram.bot.on('callback_query', async (callbackQuery: any) => {
-      try {
-        const { data, message, from } = callbackQuery;
-        if (!data || !message) return;
-
-        // Parse callback_data format: "/tasks page N"
-        const match = data.match(/^\/tasks\s+page\s+(\d+)$/);
-        if (!match) return;
-
-        const page = parseInt(match[1], 10);
-        if (isNaN(page)) return;
-
-        // Re-run handleTasksCommand with parsed page
-        const ctx: PluginCommandContext = {
-          args: `page ${page}`,
-          agentId: from.username || String(from.id),
-        };
-
-        const result = await handleTasksCommand(ctx);
-
-        // Update the message with new page content
-        await api.telegram.bot.editMessageText(result.text, {
-          chat_id: message.chat.id,
-          message_id: message.message_id,
-          parse_mode: 'Markdown',
-          reply_markup: result.channelData?.telegram?.buttons
-            ? { inline_keyboard: result.channelData.telegram.buttons }
-            : undefined,
-        });
-
-        // Answer callback query to clear loading state
-        await api.telegram.bot.answerCallbackQuery(callbackQuery.id);
-      } catch (err) {
-        console.error('[task-manager] callback_query handler error:', err);
-        // Still answer the callback to prevent loading spinner
-        try {
-          await api.telegram.bot.answerCallbackQuery(callbackQuery.id, {
-            text: 'Error loading page',
-            show_alert: false,
-          });
-        } catch (answerErr) {
-          console.error('[task-manager] answerCallbackQuery error:', answerErr);
-        }
-      }
-    });
-  }
-
   api.registerTool({
     name: "task_manager",
     description: "Manage Todo tasks. Agents MUST use this tool to interact with their assigned tasks (claim, complete, status, etc).",
