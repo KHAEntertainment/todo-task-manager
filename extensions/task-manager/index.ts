@@ -404,27 +404,10 @@ function formatTaskList({ showAll = false, detailed = false, priorityFilter, sho
 
   // Build per-task inline buttons for each visible task
   pageTasks.forEach((task: { id: string; status: string; claimedBy?: string }) => {
+    // Build per-task inline buttons — only add View button to keep UI clean
+    // Full CRUD actions available via Dashboard mini app
     const taskRow: TelegramButton[] = [];
-
-    // Complete button
-    taskRow.push({ text: `✅ Complete ${task.id}`, callback_data: `/task complete ${task.id}` });
-
-    // Claim/Resume button
-    if (task.status === "OPEN" || task.status === "BLOCKED") {
-      taskRow.push({ text: `🙋 Claim ${task.id}`, callback_data: `/task claim ${task.id}` });
-    }
-    if (task.status === "BLOCKED") {
-      taskRow.push({ text: `▶️ Resume ${task.id}`, callback_data: `/task status ${task.id} IN_PROGRESS` });
-    }
-
-    // Pause button
-    if (task.status !== "COMPLETED" && task.status !== "CANCELLED") {
-      taskRow.push({ text: `⏸ Pause ${task.id}`, callback_data: `/task pause ${task.id}` });
-    }
-
-    // View details button
-    taskRow.push({ text: `👁 View ${task.id}`, callback_data: `/task view ${task.id}` });
-
+    taskRow.push({ text: `👁 ${task.id}`, callback_data: `/task view ${task.id}` });
     buttonRows.push(taskRow);
   });
 
