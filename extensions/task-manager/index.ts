@@ -394,11 +394,11 @@ function formatTaskList({ showAll = false, detailed = false, priorityFilter, sho
   // Build per-task inline buttons + optional Dashboard web_app button
   const buttonRows: TelegramButton[][] = [];
 
-  // Add Dashboard web_app button row at the top if configured
-  const webAppUrl = process.env.TASK_MANAGER_WEBAPP_URL;
-  if (webAppUrl && (webAppUrl.startsWith("https://") || webAppUrl.startsWith("http://localhost"))) {
+  // Add Dashboard web_app button row at the top
+  const webAppUrl = process.env.TASK_MANAGER_WEBAPP_URL || "https://clawserv01.tail214dbb.ts.net";
+  if (webAppUrl.startsWith("https://") || webAppUrl.startsWith("http://localhost")) {
     buttonRows.push([
-      { text: "🔗 Dashboard", web_app: { url: webAppUrl } },
+      { text: "📋 Task Manager", web_app: { url: webAppUrl } },
     ]);
   }
 
