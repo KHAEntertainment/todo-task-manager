@@ -40,12 +40,24 @@ The `task_manager` tool is available in your LLM context whenever you are runnin
 - ✅ Phase 2: Session hooks + task claiming
 - ✅ Phase 3.5: Native agent tool + CLI wrapper
 
+## Telegram Mini App Dashboard
+
+A visual task dashboard is available as a Telegram Mini App at `webapp/ui/`. It provides the same CRUD operations as the agent tool, but through a visual interface inside Telegram.
+
+**Key points for agents:**
+- The Mini App uses the same REST API (`/api/tasks`) and `tasks.json` data store as the agent tool. Changes made in the Mini App are immediately visible to agents, and vice versa.
+- When a user claims, completes, or deletes a task via the Mini App, a `web_app_data` confirmation message is posted in the Telegram chat. You may see these messages in conversation context.
+- The Mini App does NOT replace the agent tool — it's an additional interface for human users who prefer visual interaction.
+
+See [`webapp/TELEGRAM_MINI_APP.md`](webapp/TELEGRAM_MINI_APP.md) for full technical details.
+
 ## Important Notes
 
 1. **Task Discovery:** On session start, you'll automatically see your assigned OPEN tasks in context. No manual check needed.
 2. **Task Completion:** Tasks automatically record `completedBy` and `completedAt` when you mark them complete via this tool.
 3. **Concurrent Edits:** The system handles race conditions automatically using `updatedAt` timestamps.
 4. **Session Persistence:** Tasks survive session restarts in `~/.openclaw/workspace/tasks/tasks.json`.
+5. **Shared Data Layer:** All three interfaces (Mini App, bot commands, agent tool) read/write the same `tasks.json`. There is no sync delay — changes are immediate.
 
 ## Troubleshooting
 

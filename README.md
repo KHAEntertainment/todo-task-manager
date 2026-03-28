@@ -44,6 +44,20 @@ Solves the core problem: **agents forgetting context across session restarts.** 
 
 Tasks can have `dependsOn: ["task_001", "task_002"]` arrays. Tasks with uncompleted dependencies show as BLOCKED with human-readable `blockedReason`.
 
+### Telegram Mini App
+
+The webapp (`webapp/ui/`) is a Telegram Mini App built with the [Telegram Mini App SDK](https://core.telegram.org/bots/webapps) (Bot API 9.5). It provides a native-feeling task dashboard inside Telegram:
+
+- **Theme integration** — Colors dynamically match Telegram's dark/light mode via `themeParams`
+- **BottomButton / SecondaryButton** — Context-sensitive native action buttons (Claim, Complete, Delete)
+- **BackButton** — Native back navigation through list → detail → form views
+- **HapticFeedback** — Tactile response on all user actions
+- **sendData()** — Claim/complete/delete actions send results back to the bot, which posts a confirmation in chat
+- **DeviceStorage** — Filter preferences persist across sessions
+- **Graceful degradation** — Works as a standalone web app in any browser (for development/testing)
+
+The Mini App shares the same REST API and data store as bot commands and agent tools. See [`webapp/TELEGRAM_MINI_APP.md`](webapp/TELEGRAM_MINI_APP.md) for full technical documentation.
+
 ## Quick Start
 
 ```bash
@@ -154,14 +168,12 @@ task_003: "Write tests" (OPEN, blocked by: task_001)
 
 ## Known Limitations
 
-1. **Telegram Inline Keyboards:** OpenClaw's current plugin SDK does not support native Telegram inline keyboards (`callback_query` routing to plugins). 
-   - **Workaround:** Use slash commands directly, or CLI wrapper for subagents
-   - **Future:** Revisit when OpenClaw adds full Telegram Bot API support to plugins
-
-2. **Agent Session Hooks:** Session hooks (`session_start`, `before_agent_start`) work for direct agent sessions spawned via CLI, but do NOT fire for subagents spawned through plugin tools.
+1. **Agent Session Hooks:** Session hooks (`session_start`, `before_agent_start`) work for direct agent sessions spawned via CLI, but do NOT fire for subagents spawned through plugin tools.
    - **Workaround:** Subagents must run `/tasks` manually on first startup, or use CLI wrapper
 
-3. **Task Claiming:** Only one agent can have a task IN_PROGRESS at a time. First-come, first-served.
+2. **Task Claiming:** Only one agent can have a task IN_PROGRESS at a time. First-come, first-served.
+
+3. **Mini App sendData:** `sendData()` only works when the Mini App is launched via a `web_app` type inline button (not from the menu button or direct link). The `TASK_MANAGER_WEBAPP_URL` must be HTTPS in production.
 
 ## Recent Changelog
 
@@ -199,16 +211,23 @@ task_003: "Write tests" (OPEN, blocked by: task_001)
 todo-task-manager/
 ├── extensions/
 │   └── task-manager/
-│       ├── index.ts           # Main plugin (slash commands + session hooks)
+│       ├── index.ts            # Main plugin (commands, agent tool, web_app_data handler, session hooks)
 │       ├── openclaw.plugin.json
-│       └── task-cli.js       # CLI wrapper for subagents
+│       └── task-cli.js         # CLI wrapper for subagents
 ├── skills/
 │   └── task-manager/
-│       ├── tasks.js           # Core data module (CRUD)
+│       ├── tasks.js            # Core data module (CRUD)
 │       └── tasks.json          # Data storage
-└── webapp/                     # Web app (planned for Phase 3, not active)
-    ├── ui/
-    └── ...
+└── webapp/
+    ├── TELEGRAM_MINI_APP.md    # Mini App developer guide
+    ├── server.js               # Express server (port 18799)
+    ├── package.json            # Dependencies (express)
+    ├── api/routes/tasks.js     # REST API endpoints
+    ├── data/tasks.js           # JSON file data access layer
+    └── ui/
+        ├── index.html          # SPA shell with Telegram SDK
+        ├── js/app.js           # Client-side logic (SDK integration)
+        └── css/style.css       # Themed styles (CSS custom properties)
 ```
 
 ## Related Projects

@@ -957,6 +957,31 @@ export default function register(api: any) {
   
   registerTaskManagerCommands(api);
   registerSessionHooks(api);
+
+  // Handle web_app_data from Telegram Mini App (sendData)
+  if (api.on) {
+    api.on("web_app_data", (event: { data?: string }, ctx: { chatId?: string; sendMessage?: (chatId: string, text: string) => void }) => {
+      try {
+        if (!event.data) return;
+        const data = JSON.parse(event.data);
+        const { action, taskId, title } = data;
+
+        const confirmations: Record<string, string> = {
+          claimed: `✅ Task ${taskId} claimed via Mini App: "${title}"`,
+          completed: `🎉 Task ${taskId} completed via Mini App: "${title}"`,
+          deleted: `🗑️ Task ${taskId} deleted via Mini App: "${title}"`,
+        };
+
+        const message = confirmations[action] || `📋 Task ${taskId}: ${action} via Mini App`;
+
+        if (ctx.sendMessage && ctx.chatId) {
+          ctx.sendMessage(ctx.chatId, message);
+        }
+      } catch (err) {
+        // Silently ignore malformed web_app_data
+      }
+    });
+  }
 }
 
 function formatMinimalTaskList({ showAll = false }: { showAll?: boolean } = {}): PluginCommandPayload {
